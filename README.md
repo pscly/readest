@@ -222,6 +222,146 @@ nix develop ./ops#android # enter a dev shell for the android app
 
 Please check the [wiki][link-gh-wiki] of this project for more information on development.
 
+## WebDAV Sync
+
+Readest can sync your library across devices using WebDAV. The sync feature is file-based and is designed to keep these items consistent across platforms:
+
+- Book files and covers
+- Reading progress
+- Notes and bookmarks
+- Settings
+
+### Configuration
+
+WebDAV settings are stored locally in `Settings/webdav.local.json`.
+
+- This file is local-only and is NOT included in sync.
+- `password` is NOT written to `Settings/webdav.local.json` (or any other file that may be synced).
+- The WebDAV password is stored using the OS secure storage (keychain/keyring) on each device.
+
+Fields:
+
+- `baseUrl`: Your WebDAV endpoint URL, for example `https://example.com/webdav`.
+- `rootDir`: Remote sync root directory under `baseUrl`, for example `readest1`.
+- `username`: WebDAV username.
+- `password`: WebDAV password (entered in the UI only, stored in secure storage).
+
+Example `Settings/webdav.local.json` (intentionally without `password`):
+
+```json
+{
+  "baseUrl": "https://example.com/webdav",
+  "rootDir": "readest1",
+  "username": "alice",
+  "autoSync": true
+}
+```
+
+Note: Readest also keeps a local device identifier in `Settings/webdav.device.json` (local-only, not synced). It is used for conflict copy naming.
+
+### Security note about HTTP Basic auth
+
+WebDAV typically uses HTTP Basic authentication. If you use an `http://` URL, your credentials can be exposed to anyone who can observe the network traffic.
+
+- Prefer `https://` whenever possible.
+- If you must use `http://`, only do so on a trusted network (for example, a private LAN or via a secure tunnel).
+- Never paste real credentials into logs or screenshots.
+
+### Conflict copies
+
+When Readest cannot safely merge changes, it creates conflict copies instead of overwriting data.
+
+- Location: `Books/<hash>/conflicts/`
+- Typical naming for per-book config conflicts:
+  - `Books/<hash>/conflicts/config.<deviceId>.<ts>(.<index>).json`
+
+You can inspect these files and manually reconcile differences if needed.
+
+### Trash and retention (90 days)
+
+Deletes are propagated via a trash mechanism rather than immediate permanent deletion.
+
+- Local trash: `.trash/<deletedAtMs>/...`
+- Remote trash: `.trash/<deletedAtMs>/...` under your WebDAV `rootDir`
+
+Items are kept for 90 days and can be restored during that period.
+
+Restore idea (advanced): move the folder/file from `.trash/<deletedAtMs>/...` back to its original location under `Books/` (or other original path). Prefer doing restores from within the app when available.
+
+### Troubleshooting
+
+| Symptom                                 | Likely cause                                                           | What to try                                                                                                       |
+| --------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Sync fails with `401 Unauthorized`      | Wrong username/password, or the server requires a different auth setup | Re-enter password in the app, verify credentials on the WebDAV server                                             |
+| Sync fails with `403 Forbidden`         | Server permissions deny write, or root directory is read-only          | Check WebDAV user permissions, try a different `rootDir`, verify server-side ACLs                                 |
+| Sync fails on `http://`                 | Network blocks plain HTTP, or captive portal / proxy interferes        | Switch to `https://`, or use a trusted private network or tunnel                                                  |
+| Conflicts keep appearing                | Same file edited on multiple devices before syncing                    | Let one device finish syncing first, then sync other devices, review conflict copies in `Books/<hash>/conflicts/` |
+| Library looks out of date on one device | Auto sync disabled, or last sync failed                                | Enable `autoSync`, run a manual sync, check for an auth error                                                     |
+
+## Release (Tag)
+
+GitHub Releases are built by GitHub Actions when you push a version tag.
+
+### Create and push a tag
+
+1. Make sure your branch is up to date and the commit you want to release is on the default branch.
+2. Create a tag that matches `v0.x.y`.
+3. Push the tag.
+
+```bash
+git tag v0.x.y
+git push origin v0.x.y
+```
+
+After the workflow finishes, the release page should include assets such as:
+
+- Windows installer (NSIS `.exe`)
+- Windows portable package
+- Android APK builds (universal and arm64)
+- Updater assets (for example `latest.json` and `.sig` files)
+
+Workflow definition: `.github/workflows/release.yml`
+
+### Maintainers: Signing Secrets
+
+Do not commit Android keystores or Tauri signer private keys to this repository. Configure them only in GitHub repository secrets.
+
+Required secrets:
+
+- `ANDROID_KEY_BASE64`: Base64-encoded Android keystore (`.jks`)
+- `ANDROID_KEY_ALIAS`: Android keystore alias
+- `ANDROID_KEY_PASSWORD`: Android keystore store/key password
+- `TAURI_SIGNING_PRIVATE_KEY`: Tauri updater signing private key content
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: Tauri updater signing key password
+
+Generate an Android release keystore (example with placeholders):
+
+```bash
+keytool -genkeypair -v \
+  -keystore ./readest-release.jks \
+  -alias "__ANDROID_KEY_ALIAS__" \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000 \
+  -storepass "__ANDROID_KEY_PASSWORD__" \
+  -keypass "__ANDROID_KEY_PASSWORD__" \
+  -dname "CN=Readest, OU=Mobile, O=Example, L=City, ST=State, C=US"
+```
+
+Base64-encode the keystore for `ANDROID_KEY_BASE64`:
+
+```bash
+base64 -w 0 ./readest-release.jks > ./readest-release.jks.base64
+```
+
+Generate a Tauri signer keypair (example with placeholders):
+
+```bash
+pnpm --filter @readest/readest-app tauri signer generate -w "__OUTPUT_PRIVATE_KEY_PATH__"
+```
+
+Use the generated private key file content as `TAURI_SIGNING_PRIVATE_KEY`, and the passphrase you entered as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+
 ## Troubleshooting
 
 ### 1. Readest Won’t Launch on Windows (Missing Edge WebView2 Runtime)
