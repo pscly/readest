@@ -264,7 +264,7 @@ impl<R: Runtime> NativeBridge<R> {
                     })
                 }
             };
-            match entry.delete_password() {
+            match entry.delete_credential() {
                 Ok(()) => {
                     return Ok(SecureStoreOpResponse {
                         success: true,
