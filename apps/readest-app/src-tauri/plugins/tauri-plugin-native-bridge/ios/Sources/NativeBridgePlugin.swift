@@ -9,6 +9,7 @@ import Tauri
 import UIKit
 import WebKit
 import os
+import Security
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier!, category: "NativeBridge")
 
@@ -60,6 +61,105 @@ class CopyUriToPathRequestArgs: Decodable {
 
 struct InitializeRequest: Decodable {
   let publicKey: String?
+}
+
+struct SecureStoreSetRequestArgs: Decodable {
+  let key: String
+  let value: String
+}
+
+struct SecureStoreGetRequestArgs: Decodable {
+  let key: String
+}
+
+struct SecureStoreDeleteRequestArgs: Decodable {
+  let key: String
+}
+
+private let secureStoreService = "com.readest.secure_store"
+
+private func isValidSecureStoreKey(_ key: String) -> Bool {
+  if key.isEmpty || key.count > 128 {
+    return false
+  }
+  for ch in key {
+    if (ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9") || ch == "." || ch == "_" || ch == "-" {
+      continue
+    }
+    return false
+  }
+  return true
+}
+
+private func secErrorMessage(_ status: OSStatus) -> String {
+  if let message = SecCopyErrorMessageString(status, nil) {
+    return message as String
+  }
+  return "Keychain error: \(status)"
+}
+
+private func keychainBaseQuery(account: String) -> [String: Any] {
+  return [
+    kSecClass as String: kSecClassGenericPassword,
+    kSecAttrService as String: secureStoreService,
+    kSecAttrAccount as String: account
+  ]
+}
+
+private func keychainSet(account: String, value: String) -> String? {
+  guard let data = value.data(using: .utf8) else {
+    return "Invalid value encoding"
+  }
+
+  var query = keychainBaseQuery(account: account)
+  let status = SecItemCopyMatching(query as CFDictionary, nil)
+  if status == errSecSuccess {
+    let attrs: [String: Any] = [kSecValueData as String: data]
+    let updateStatus = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
+    if updateStatus != errSecSuccess {
+      return secErrorMessage(updateStatus)
+    }
+    return nil
+  }
+  if status != errSecItemNotFound {
+    return secErrorMessage(status)
+  }
+
+  query[kSecValueData as String] = data
+  let addStatus = SecItemAdd(query as CFDictionary, nil)
+  if addStatus != errSecSuccess {
+    return secErrorMessage(addStatus)
+  }
+  return nil
+}
+
+private func keychainGet(account: String) -> (value: String?, error: String?) {
+  var query = keychainBaseQuery(account: account)
+  query[kSecReturnData as String] = true
+  query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+  var item: CFTypeRef?
+  let status = SecItemCopyMatching(query as CFDictionary, &item)
+  if status == errSecItemNotFound {
+    return (nil, nil)
+  }
+  if status != errSecSuccess {
+    return (nil, secErrorMessage(status))
+  }
+  guard let data = item as? Data else {
+    return (nil, "Invalid keychain item")
+  }
+  let value = String(data: data, encoding: .utf8)
+  return (value, value == nil ? "Invalid value encoding" : nil)
+}
+
+private func keychainDelete(account: String) -> String? {
+  let query = keychainBaseQuery(account: account)
+  let status = SecItemDelete(query as CFDictionary)
+  if status == errSecSuccess || status == errSecItemNotFound {
+    return nil
+  }
+  return secErrorMessage(status)
 }
 
 struct FetchProductsRequest: Decodable {
@@ -712,6 +812,59 @@ class NativeBridgePlugin: Plugin {
 
   @objc public func iap_is_available(_ invoke: Invoke) {
     invoke.resolve(["available": true])
+  }
+
+  @objc public func secure_store_set(_ invoke: Invoke) {
+    do {
+      let args = try invoke.parseArgs(SecureStoreSetRequestArgs.self)
+      if !isValidSecureStoreKey(args.key) {
+        return invoke.resolve(["success": false, "error": "Invalid secure store key"])
+      }
+      if args.value.count > 16 * 1024 {
+        return invoke.resolve(["success": false, "error": "Value too large"])
+      }
+      if let error = keychainSet(account: args.key, value: args.value) {
+        return invoke.resolve(["success": false, "error": error])
+      }
+      invoke.resolve(["success": true])
+    } catch {
+      invoke.resolve(["success": false, "error": error.localizedDescription])
+    }
+  }
+
+  @objc public func secure_store_get(_ invoke: Invoke) {
+    do {
+      let args = try invoke.parseArgs(SecureStoreGetRequestArgs.self)
+      if !isValidSecureStoreKey(args.key) {
+        return invoke.resolve(["value": NSNull(), "error": "Invalid secure store key"])
+      }
+      let result = keychainGet(account: args.key)
+      if let error = result.error {
+        return invoke.resolve(["value": NSNull(), "error": error])
+      }
+      if let value = result.value {
+        invoke.resolve(["value": value])
+      } else {
+        invoke.resolve(["value": NSNull()])
+      }
+    } catch {
+      invoke.resolve(["value": NSNull(), "error": error.localizedDescription])
+    }
+  }
+
+  @objc public func secure_store_delete(_ invoke: Invoke) {
+    do {
+      let args = try invoke.parseArgs(SecureStoreDeleteRequestArgs.self)
+      if !isValidSecureStoreKey(args.key) {
+        return invoke.resolve(["success": false, "error": "Invalid secure store key"])
+      }
+      if let error = keychainDelete(account: args.key) {
+        return invoke.resolve(["success": false, "error": error])
+      }
+      invoke.resolve(["success": true])
+    } catch {
+      invoke.resolve(["success": false, "error": error.localizedDescription])
+    }
   }
 
   @objc public func iap_initialize(_ invoke: Invoke) {

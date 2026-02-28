@@ -4,6 +4,25 @@ use tauri::{plugin::PluginApi, AppHandle, Runtime};
 
 use crate::models::*;
 
+const SECURE_STORE_SERVICE: &str = "Readest";
+
+fn validate_secure_store_key(key: &str) -> crate::Result<()> {
+    if key.is_empty() || key.len() > 128 {
+        return Err(crate::Error::NativeBridgeError(
+            "Invalid secure store key length".to_string(),
+        ));
+    }
+    if !key
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_' || c == '-')
+    {
+        return Err(crate::Error::NativeBridgeError(
+            "Invalid secure store key characters".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
     _api: PluginApi<R, C>,
@@ -144,6 +163,124 @@ impl<R: Runtime> NativeBridge<R> {
     pub fn request_manage_storage_permission(
         &self,
     ) -> crate::Result<RequestManageStoragePermissionResponse> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn secure_store_set(
+        &self,
+        payload: SecureStoreSetRequest,
+    ) -> crate::Result<SecureStoreOpResponse> {
+        validate_secure_store_key(&payload.key)?;
+        if payload.value.len() > 16 * 1024 {
+            return Ok(SecureStoreOpResponse {
+                success: false,
+                error: Some("Value too large".to_string()),
+            });
+        }
+
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        {
+            let entry = match keyring::Entry::new(SECURE_STORE_SERVICE, &payload.key) {
+                Ok(entry) => entry,
+                Err(e) => {
+                    return Ok(SecureStoreOpResponse {
+                        success: false,
+                        error: Some(e.to_string()),
+                    })
+                }
+            };
+
+            match entry.set_password(&payload.value) {
+                Ok(()) => {
+                    return Ok(SecureStoreOpResponse {
+                        success: true,
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    return Ok(SecureStoreOpResponse {
+                        success: false,
+                        error: Some(e.to_string()),
+                    })
+                }
+            }
+        }
+
+        #[allow(unreachable_code)]
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn secure_store_get(
+        &self,
+        payload: SecureStoreGetRequest,
+    ) -> crate::Result<SecureStoreGetResponse> {
+        validate_secure_store_key(&payload.key)?;
+
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        {
+            let entry = match keyring::Entry::new(SECURE_STORE_SERVICE, &payload.key) {
+                Ok(entry) => entry,
+                Err(e) => {
+                    return Ok(SecureStoreGetResponse {
+                        value: None,
+                        error: Some(e.to_string()),
+                    })
+                }
+            };
+            match entry.get_password() {
+                Ok(value) => {
+                    return Ok(SecureStoreGetResponse {
+                        value: Some(value),
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    return Ok(SecureStoreGetResponse {
+                        value: None,
+                        error: Some(e.to_string()),
+                    })
+                }
+            }
+        }
+
+        #[allow(unreachable_code)]
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
+    pub fn secure_store_delete(
+        &self,
+        payload: SecureStoreDeleteRequest,
+    ) -> crate::Result<SecureStoreOpResponse> {
+        validate_secure_store_key(&payload.key)?;
+
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+        {
+            let entry = match keyring::Entry::new(SECURE_STORE_SERVICE, &payload.key) {
+                Ok(entry) => entry,
+                Err(e) => {
+                    return Ok(SecureStoreOpResponse {
+                        success: false,
+                        error: Some(e.to_string()),
+                    })
+                }
+            };
+            match entry.delete_password() {
+                Ok(()) => {
+                    return Ok(SecureStoreOpResponse {
+                        success: true,
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    return Ok(SecureStoreOpResponse {
+                        success: false,
+                        error: Some(e.to_string()),
+                    })
+                }
+            }
+        }
+
+        #[allow(unreachable_code)]
         Err(crate::Error::UnsupportedPlatformError)
     }
 }

@@ -29,6 +29,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
@@ -93,6 +95,22 @@ class PurchaseProductRequestArgs {
     val productId: String? = null
 }
 
+@InvokeArg
+class SecureStoreSetArgs {
+    var key: String? = null
+    var value: String? = null
+}
+
+@InvokeArg
+class SecureStoreGetArgs {
+    var key: String? = null
+}
+
+@InvokeArg
+class SecureStoreDeleteArgs {
+    var key: String? = null
+}
+
 data class ProductData(
     val id: String,
     val title: String,
@@ -128,6 +146,28 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
     private var redirectHost = "auth-callback"
     private val billingManager by lazy {
         BillingManager(activity)
+    }
+
+    private val securePrefs by lazy {
+        val context = activity.applicationContext
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+
+        EncryptedSharedPreferences.create(
+            context,
+            "readest_secure_store",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    private fun isValidSecureKey(key: String): Boolean {
+        if (key.isEmpty() || key.length > 128) return false
+        return key.all { ch ->
+            ch in 'a'..'z' || ch in '0'..'9' || ch == '.' || ch == '_' || ch == '-'
+        }
     }
 
     companion object {
@@ -620,6 +660,78 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             result.put("purchases", purchasesArray)
             invoke.resolve(result)
         }
+    }
+
+    @Command
+    fun secure_store_set(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            val args = invoke.parseArgs(SecureStoreSetArgs::class.java)
+            val key = args.key ?: ""
+            val value = args.value ?: ""
+
+            if (!isValidSecureKey(key)) {
+                ret.put("success", false)
+                ret.put("error", "Invalid secure store key")
+                invoke.resolve(ret)
+                return
+            }
+            if (value.length > 16 * 1024) {
+                ret.put("success", false)
+                ret.put("error", "Value too large")
+                invoke.resolve(ret)
+                return
+            }
+
+            securePrefs.edit().putString(key, value).apply()
+            ret.put("success", true)
+        } catch (e: Exception) {
+            ret.put("success", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun secure_store_get(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            val args = invoke.parseArgs(SecureStoreGetArgs::class.java)
+            val key = args.key ?: ""
+            if (!isValidSecureKey(key)) {
+                ret.put("value", null)
+                ret.put("error", "Invalid secure store key")
+                invoke.resolve(ret)
+                return
+            }
+            val value = securePrefs.getString(key, null)
+            ret.put("value", value)
+        } catch (e: Exception) {
+            ret.put("value", null)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun secure_store_delete(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            val args = invoke.parseArgs(SecureStoreDeleteArgs::class.java)
+            val key = args.key ?: ""
+            if (!isValidSecureKey(key)) {
+                ret.put("success", false)
+                ret.put("error", "Invalid secure store key")
+                invoke.resolve(ret)
+                return
+            }
+            securePrefs.edit().remove(key).apply()
+            ret.put("success", true)
+        } catch (e: Exception) {
+            ret.put("success", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
     }
 
     @Command

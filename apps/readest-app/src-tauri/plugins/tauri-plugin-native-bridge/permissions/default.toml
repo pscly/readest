@@ -31,4 +31,7 @@ permissions = [
   "allow-request-permissions",
   "allow-checkPermissions",
   "allow-requestPermissions",
+  "allow-secure-store-set",
+  "allow-secure-store-get",
+  "allow-secure-store-delete",
 ]

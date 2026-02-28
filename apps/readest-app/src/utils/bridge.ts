@@ -96,6 +96,29 @@ export interface GetStorefrontRegionCodeResponse {
   error?: string;
 }
 
+export interface SecureStoreSetRequest {
+  key: string;
+  value: string;
+}
+
+export interface SecureStoreGetRequest {
+  key: string;
+}
+
+export interface SecureStoreDeleteRequest {
+  key: string;
+}
+
+export interface SecureStoreGetResponse {
+  value: string | null;
+  error?: string;
+}
+
+export interface SecureStoreOpResponse {
+  success: boolean;
+  error?: string;
+}
+
 export async function copyURIToPath(request: CopyURIRequest): Promise<CopyURIResponse> {
   const result = await invoke<CopyURIResponse>('plugin:native-bridge|copy_uri_to_path', {
     payload: request,
@@ -212,5 +235,32 @@ export async function getStorefrontRegionCode(): Promise<GetStorefrontRegionCode
   const result = await invoke<GetStorefrontRegionCodeResponse>(
     'plugin:native-bridge|get_storefront_region_code',
   );
+  return result;
+}
+
+export async function secureStoreSet(
+  request: SecureStoreSetRequest,
+): Promise<SecureStoreOpResponse> {
+  const result = await invoke<SecureStoreOpResponse>('plugin:native-bridge|secure_store_set', {
+    payload: request,
+  });
+  return result;
+}
+
+export async function secureStoreGet(
+  request: SecureStoreGetRequest,
+): Promise<SecureStoreGetResponse> {
+  const result = await invoke<SecureStoreGetResponse>('plugin:native-bridge|secure_store_get', {
+    payload: request,
+  });
+  return result;
+}
+
+export async function secureStoreDelete(
+  request: SecureStoreDeleteRequest,
+): Promise<SecureStoreOpResponse> {
+  const result = await invoke<SecureStoreOpResponse>('plugin:native-bridge|secure_store_delete', {
+    payload: request,
+  });
   return result;
 }

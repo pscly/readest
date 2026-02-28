@@ -241,3 +241,36 @@ impl<R: Runtime> NativeBridge<R> {
             .map_err(Into::into)
     }
 }
+
+impl<R: Runtime> NativeBridge<R> {
+    pub fn secure_store_set(
+        &self,
+        payload: SecureStoreSetRequest,
+    ) -> crate::Result<SecureStoreOpResponse> {
+        self.0
+            .run_mobile_plugin("secure_store_set", payload)
+            .map_err(Into::into)
+    }
+}
+
+impl<R: Runtime> NativeBridge<R> {
+    pub fn secure_store_get(
+        &self,
+        payload: SecureStoreGetRequest,
+    ) -> crate::Result<SecureStoreGetResponse> {
+        self.0
+            .run_mobile_plugin("secure_store_get", payload)
+            .map_err(Into::into)
+    }
+}
+
+impl<R: Runtime> NativeBridge<R> {
+    pub fn secure_store_delete(
+        &self,
+        payload: SecureStoreDeleteRequest,
+    ) -> crate::Result<SecureStoreOpResponse> {
+        self.0
+            .run_mobile_plugin("secure_store_delete", payload)
+            .map_err(Into::into)
+    }
+}

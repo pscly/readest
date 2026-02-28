@@ -83,6 +83,7 @@ import { CustomTextureInfo } from '@/styles/textures';
 import { CustomFont, CustomFontInfo } from '@/styles/fonts';
 import { parseFontInfo } from '@/utils/font';
 import { svg2png } from '@/utils/svg';
+import { migrateLocalStorageToSettings } from './migrations/migrateLocalStorageToSettings';
 
 export abstract class BaseAppService implements AppService {
   osPlatform: OsPlatform = getOSPlatform();
@@ -116,7 +117,8 @@ export abstract class BaseAppService implements AppService {
   storefrontRegionCode: string | null = null;
   isOnlineCatalogsAccessible = true;
 
-  protected CURRENT_MIGRATION_VERSION = 20251124;
+  protected CURRENT_MIGRATION_VERSION = 20260227;
+  protected latestLoadedSettings: SystemSettings | null = null;
 
   protected abstract fs: FileSystem;
   protected abstract resolvePath(fp: string, base: BaseDir): ResolvedPath;
@@ -139,6 +141,14 @@ export abstract class BaseAppService implements AppService {
         await this.migrate20251124();
       } catch (error) {
         console.error('Error migrating to version 20251124:', error);
+      }
+    }
+
+    if (lastMigrationVersion < 20260227) {
+      try {
+        await this.migrate20260227LocalStorageToSettings();
+      } catch (error) {
+        console.error('Error migrating to version 20260227:', error);
       }
     }
   }
@@ -281,11 +291,13 @@ export abstract class BaseAppService implements AppService {
     }
 
     this.localBooksDir = settings.localBooksDir;
+    this.latestLoadedSettings = settings;
     return settings;
   }
 
   async saveSettings(settings: SystemSettings): Promise<void> {
     await this.safeSaveJSON(SETTINGS_FILENAME, 'Settings', settings);
+    this.latestLoadedSettings = settings;
   }
 
   async importFont(file?: string | File): Promise<CustomFontInfo | null> {
@@ -980,6 +992,14 @@ export abstract class BaseAppService implements AppService {
       } catch (error) {
         console.error('Error during migration to rename backup library file:', error);
       }
+    }
+  }
+
+  private async migrate20260227LocalStorageToSettings(): Promise<void> {
+    const settings = this.latestLoadedSettings ?? (await this.loadSettings());
+    const changed = migrateLocalStorageToSettings(settings);
+    if (changed) {
+      await this.saveSettings(settings);
     }
   }
 }

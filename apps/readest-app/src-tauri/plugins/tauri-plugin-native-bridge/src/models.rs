@@ -237,3 +237,36 @@ pub struct GetStorefrontRegionCodeResponse {
     pub region_code: Option<String>,
     pub error: Option<String>,
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureStoreSetRequest {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureStoreGetRequest {
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureStoreDeleteRequest {
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureStoreGetResponse {
+    pub value: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureStoreOpResponse {
+    pub success: bool,
+    pub error: Option<String>,
+}

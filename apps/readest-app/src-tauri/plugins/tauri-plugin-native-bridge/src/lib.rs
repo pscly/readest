@@ -79,6 +79,9 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::select_directory,
             commands::get_storefront_region_code,
             commands::request_manage_storage_permission,
+            commands::secure_store_set,
+            commands::secure_store_get,
+            commands::secure_store_delete,
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

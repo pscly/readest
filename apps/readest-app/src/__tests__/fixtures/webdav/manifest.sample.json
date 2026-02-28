@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": 1730000000000,
+  "entries": {
+    "Books/Example Book.epub": {
+      "path": "Books/Example Book.epub",
+      "updatedAt": 1730000000000,
+      "size": 123456,
+      "etag": "\"abc123\"",
+      "contentHash": "sha256:deadbeef"
+    }
+  }
+}

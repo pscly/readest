@@ -97,6 +97,9 @@ export const tauriUpload = async (
   method: UploadMethod,
   progressHandler?: ProgressHandler,
   headers?: Map<string, string>,
+  options?: {
+    skipSslVerification?: boolean;
+  },
 ): Promise<string> => {
   const ids = new Uint32Array(1);
   window.crypto.getRandomValues(ids);
@@ -113,6 +116,7 @@ export const tauriUpload = async (
     filePath,
     method,
     headers: headers ?? {},
+    skipSslVerification: options?.skipSslVerification,
     onProgress,
   });
 };

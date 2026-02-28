@@ -199,3 +199,27 @@ pub(crate) async fn request_manage_storage_permission<R: Runtime>(
 ) -> Result<RequestManageStoragePermissionResponse> {
     app.native_bridge().request_manage_storage_permission()
 }
+
+#[command]
+pub(crate) async fn secure_store_set<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SecureStoreSetRequest,
+) -> Result<SecureStoreOpResponse> {
+    app.native_bridge().secure_store_set(payload)
+}
+
+#[command]
+pub(crate) async fn secure_store_get<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SecureStoreGetRequest,
+) -> Result<SecureStoreGetResponse> {
+    app.native_bridge().secure_store_get(payload)
+}
+
+#[command]
+pub(crate) async fn secure_store_delete<R: Runtime>(
+    app: AppHandle<R>,
+    payload: SecureStoreDeleteRequest,
+) -> Result<SecureStoreOpResponse> {
+    app.native_bridge().secure_store_delete(payload)
+}
