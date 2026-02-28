@@ -7,6 +7,7 @@ import type { AISettings } from '@/services/ai/types';
 import type { NotebookTab } from '@/store/notebookStore';
 
 export type ThemeType = 'light' | 'dark' | 'auto';
+export type SyncBackend = 'off' | 'cloud' | 'webdav';
 export type LibraryViewModeType = 'grid' | 'list';
 export const LibrarySortByType = {
   Title: 'title',
@@ -74,6 +75,11 @@ export interface SystemSettings {
   version: number;
   localBooksDir: string;
   customRootDir?: string;
+  themeMode?: ThemeType;
+  themeColor?: string;
+  ttsPreferredVoices?: Record<string, string>;
+  customShortcuts?: Record<string, string[]>;
+  syncBackend?: SyncBackend;
 
   keepLogin: boolean;
   autoUpload: boolean;

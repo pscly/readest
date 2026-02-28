@@ -23,10 +23,17 @@ import { tauriHandleSetAlwaysOnTop, tauriHandleToggleFullScreen } from '@/utils/
 import { optInTelemetry, optOutTelemetry } from '@/utils/telemetry';
 import { setAboutDialogVisible } from '@/components/AboutWindow';
 import { setMigrateDataDirDialogVisible } from '@/app/library/components/MigrateDataWindow';
+import { setWebDavSyncSettingsWindowVisible } from '@/app/library/components/WebDavSyncSettings';
 import { requestStoragePermission } from '@/utils/permission';
 import { saveSysSettings } from '@/helpers/settings';
 import { selectDirectory } from '@/utils/bridge';
 import { formatLocaleDateTime } from '@/utils/book';
+import { eventDispatcher } from '@/utils/event';
+import type { SyncBackend } from '@/types/settings';
+import { runWebDavSyncOnce, WebDavSyncNotConfiguredError } from '@/services/sync/webdav/runOnce';
+import { WebDavSyncAlreadyRunningError } from '@/services/sync/webdav/engine';
+import { WebDavHttpError } from '@/services/sync/webdav/client';
+import { WebDavCredentialsError } from '@/services/sync/webdav/credentials';
 import UserAvatar from '@/components/UserAvatar';
 import MenuItem from '@/components/MenuItem';
 import Quota from '@/components/Quota';
@@ -66,7 +73,7 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
   );
   const iconSize = useResponsiveSize(16);
 
-  const { isSyncing } = useLibraryStore();
+  const { isSyncing, setIsSyncing } = useLibraryStore();
   const { stats, hasActiveTransfers, setIsTransferQueueOpen } = useTransferQueue();
 
   const openTransferQueue = () => {
@@ -188,6 +195,87 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
     setSettingsDialogOpen(true);
   };
 
+  const openWebDavSyncSettings = () => {
+    setIsDropdownOpen?.(false);
+    setWebDavSyncSettingsWindowVisible(true);
+  };
+
+  const classifyWebDavSyncError = (error: unknown): { message: string; type: 'error' | 'info' } => {
+    if (error instanceof WebDavHttpError) {
+      if (error.status === 401) {
+        return { message: 'WebDAV authentication failed', type: 'error' };
+      }
+      if (error.status === 403) {
+        return { message: 'WebDAV permission denied', type: 'error' };
+      }
+      if (error.status === 404) {
+        return { message: 'WebDAV path not found', type: 'error' };
+      }
+      return { message: 'WebDAV request failed', type: 'error' };
+    }
+
+    if (error instanceof WebDavSyncNotConfiguredError) {
+      return { message: 'WebDAV is not configured', type: 'info' };
+    }
+
+    if (error instanceof WebDavSyncAlreadyRunningError) {
+      return { message: 'WebDAV sync is already running', type: 'info' };
+    }
+
+    if (error instanceof WebDavCredentialsError) {
+      return { message: 'WebDAV credentials are unavailable', type: 'error' };
+    }
+
+    return { message: 'WebDAV sync failed', type: 'error' };
+  };
+
+  const handleChangeSyncBackend = (syncBackend: SyncBackend) => {
+    saveSysSettings(envConfig, 'syncBackend', syncBackend);
+  };
+
+  const handleSyncNow = async () => {
+    if (isSyncing) {
+      return;
+    }
+
+    const syncBackend = settings.syncBackend ?? 'cloud';
+    if (syncBackend === 'off') {
+      eventDispatcher.dispatch('toast', { message: _('Sync is turned off'), type: 'info' });
+      return;
+    }
+
+    if (syncBackend === 'cloud') {
+      onPullLibrary(true, true);
+      return;
+    }
+
+    if (!appService) {
+      eventDispatcher.dispatch('toast', {
+        message: _('WebDAV is unavailable on this platform'),
+        type: 'error',
+      });
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      const result = await runWebDavSyncOnce(appService);
+      const message =
+        result.warnings.length > 0
+          ? _('Synced {{count}} item(s) with {{warnings}} warning(s)', {
+              count: result.operations.length,
+              warnings: result.warnings.length,
+            })
+          : _('Synced {{count}} item(s)', { count: result.operations.length });
+      eventDispatcher.dispatch('toast', { message, type: 'info' });
+    } catch (error) {
+      const classified = classifyWebDavSyncError(error);
+      eventDispatcher.dispatch('toast', { message: _(classified.message), type: classified.type });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleSetSavedBookCoverForLockScreen = async () => {
     if (!(await requestStoragePermission()) && appService?.distChannel === 'readest') return;
 
@@ -232,6 +320,9 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
   const savedBookCoverPath = settings.savedBookCoverForLockScreenPath;
   const coverDir = savedBookCoverPath ? savedBookCoverPath.split('/').pop() : 'Images';
   const savedBookCoverDescription = `💾 ${coverDir}/last-book-cover.png`;
+  const syncBackend = settings.syncBackend ?? 'cloud';
+  const syncBackendDescription =
+    syncBackend === 'off' ? _('Off') : syncBackend === 'webdav' ? _('WebDAV') : _('Cloud');
 
   return (
     <Menu
@@ -285,9 +376,10 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
               Icon={user ? MdSync : MdSyncProblem}
               labelClass='ps-2 pe-1 !mx-0'
               iconClassName={user && isSyncing ? 'animate-reverse-spin' : ''}
-              onClick={onPullLibrary.bind(null, true, true)}
+              onClick={handleSyncNow}
             />
             <button
+              type='button'
               onClick={handleUserProfile}
               className='hover:bg-base-300 w-full rounded-md'
               style={{
@@ -330,7 +422,7 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
           onClick={toggleAutoCheckUpdates}
         />
       )}
-      <hr aria-hidden='true' className='border-base-200 my-1' />
+      <hr className='border-base-200 my-1' />
       {appService?.hasWindow && (
         <MenuItem
           label={_('Open Book in New Window')}
@@ -368,9 +460,38 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
         onClick={cycleThemeMode}
       />
       <MenuItem label={_('Settings')} Icon={PiGear} onClick={openSettingsDialog} />
+      <MenuItem label={_('Sync Backend')} description={syncBackendDescription}>
+        <ul
+          className='ms-0 flex flex-col before:hidden'
+          style={{
+            paddingInlineStart: `${iconSize}px`,
+          }}
+        >
+          <MenuItem
+            label={_('Off')}
+            toggled={syncBackend === 'off'}
+            onClick={() => handleChangeSyncBackend('off')}
+          />
+          <MenuItem
+            label={_('Cloud')}
+            toggled={syncBackend === 'cloud'}
+            onClick={() => handleChangeSyncBackend('cloud')}
+          />
+          {isTauriAppPlatform() && (
+            <MenuItem
+              label={_('WebDAV')}
+              toggled={syncBackend === 'webdav'}
+              onClick={() => handleChangeSyncBackend('webdav')}
+            />
+          )}
+        </ul>
+      </MenuItem>
+      {isTauriAppPlatform() && (
+        <MenuItem label={_('WebDAV Sync')} Icon={MdSync} onClick={openWebDavSyncSettings} />
+      )}
       {appService?.canCustomizeRootDir && (
         <>
-          <hr aria-hidden='true' className='border-base-200 my-1' />
+          <hr className='border-base-200 my-1' />
           <MenuItem label={_('Advanced Settings')}>
             <ul
               className='ms-0 flex flex-col before:hidden'
@@ -396,7 +517,7 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
           </MenuItem>
         </>
       )}
-      <hr aria-hidden='true' className='border-base-200 my-1' />
+      <hr className='border-base-200 my-1' />
       {user && userProfilePlan === 'free' && (
         <MenuItem label={_('Upgrade to Readest Premium')} onClick={handleUpgrade} />
       )}

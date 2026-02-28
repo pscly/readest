@@ -2,8 +2,17 @@ name: Release Readest
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
+    inputs:
+      tag:
+        description: 'Release tag（例如 v0.9.0），留空时按 package.json 版本生成'
+        required: false
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   get-release:
@@ -20,19 +29,6 @@ jobs:
       - uses: actions/checkout@v6
       - name: setup node
         uses: actions/setup-node@v6
-      - name: get version
-        run: echo "PACKAGE_VERSION=$(node -p "require('./apps/readest-app/package.json').version")" >> $GITHUB_ENV
-      - name: get release
-        id: get-release
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const { data } = await github.rest.repos.getLatestRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            })
-            core.setOutput('release_id', data.id);
-            core.setOutput('release_tag', data.tag_name);
       - name: get release notes
         id: get-release-notes
         uses: actions/github-script@v8
@@ -47,8 +43,70 @@ jobs:
             console.log('Formatted release note:', releaseNote);
             core.setOutput('release_version', version);
             core.setOutput('release_note', releaseNote);
+      - name: resolve release tag
+        id: resolve-release-tag
+        env:
+          RELEASE_VERSION: ${{ steps.get-release-notes.outputs.release_version }}
+          INPUT_TAG: ${{ github.event.inputs.tag || '' }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            release_tag="${{ github.ref_name }}"
+          elif [ -n "$INPUT_TAG" ]; then
+            release_tag="$INPUT_TAG"
+          else
+            release_tag="v${RELEASE_VERSION}"
+          fi
+
+          if [[ ! "$release_tag" =~ ^v.+$ ]]; then
+            echo "Release tag must start with v, got: $release_tag"
+            exit 1
+          fi
+
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+      - name: get or create release by tag
+        id: get-release
+        uses: actions/github-script@v8
+        env:
+          RELEASE_TAG: ${{ steps.resolve-release-tag.outputs.release_tag }}
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            let release;
+
+            try {
+              const response = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+              release = response.data;
+              core.info(`Found existing release for tag ${tag}: ${release.id}`);
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              const response = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: `Readest ${tag}`,
+                draft: true,
+                prerelease: false,
+                generate_release_notes: false,
+              });
+              release = response.data;
+              core.info(`Created draft release for tag ${tag}: ${release.id}`);
+            }
+
+            core.setOutput('release_id', String(release.id));
+            core.setOutput('release_tag', release.tag_name);
 
   update-release:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -76,12 +134,11 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: process.env.release_id,
-              body: body,
-              draft: false,
-              prerelease: false
+              body: body
             })
 
   build-koreader-plugin:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: get-release
     permissions:
       contents: write
@@ -106,6 +163,7 @@ jobs:
           gh release upload ${{ needs.get-release.outputs.release_tag }} ${plugin_zip} --clobber
 
   build-tauri:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: get-release
     permissions:
       contents: write
@@ -226,6 +284,14 @@ jobs:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+
+          echo "::add-mask::${{ secrets.ANDROID_KEY_BASE64 }}"
+          echo "::add-mask::${{ secrets.ANDROID_KEY_ALIAS }}"
+          echo "::add-mask::${{ secrets.ANDROID_KEY_PASSWORD }}"
+          echo "::add-mask::${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
+          echo "::add-mask::${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+
           cd apps/readest-app/
           rm -rf src-tauri/gen/android
           pnpm tauri android init
@@ -248,6 +314,11 @@ jobs:
           pnpm tauri android build -t aarch64
           cp ${apk_path}/app-universal-release.apk $arm64_apk
 
+          APKSIGNER=$(ls -1 "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          apksigner="$APKSIGNER"
+          $apksigner verify --verbose "$universial_apk"
+          $apksigner verify --verbose "$arm64_apk"
+
           echo "Uploading $universial_apk to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk --clobber
           echo "Uploading $arm64_apk to GitHub release"
@@ -257,32 +328,6 @@ jobs:
           pnpm tauri signer sign $arm64_apk
           gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk.sig --clobber
           gh release upload ${{ needs.get-release.outputs.release_tag }} $arm64_apk.sig --clobber
-
-      - name: download and update latest.json for Android release
-        if: matrix.config.release == 'android'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          cd apps/readest-app/
-          curl -sL https://github.com/readest/readest/releases/latest/download/latest.json -o latest.json
-
-          version=${{ needs.get-release.outputs.release_version }}
-          universial_apk_url="https://github.com/readest/readest/releases/download/${{ needs.get-release.outputs.release_tag }}/Readest_${version}_universal.apk"
-          arm64_apk_url="https://github.com/readest/readest/releases/download/${{ needs.get-release.outputs.release_tag }}/Readest_${version}_arm64.apk"
-
-          universial_sig=$(cat Readest_${version}_universal.apk.sig)
-          arm64_sig=$(cat Readest_${version}_arm64.apk.sig)
-
-          jq --arg url "$universial_apk_url" \
-              --arg sig "$universial_sig" \
-              '.platforms["android-universal"] = {signature: $sig, url: $url}' latest.json > tmp.$$.json && mv tmp.$$.json latest.json
-
-          jq --arg url "$arm64_apk_url" \
-              --arg sig "$arm64_sig" \
-              '.platforms["android-arm64"] = {signature: $sig, url: $url}' latest.json > tmp.$$.json && mv tmp.$$.json latest.json
-
-          echo "Uploading updated latest.json to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
 
       - name: Override tauri-cli with custom AppImage format (Linux)
         if: matrix.config.release == 'linux'
@@ -360,42 +405,235 @@ jobs:
           echo "Uploading signature to GitHub release"
           gh release upload ${{ needs.get-release.outputs.release_tag }} $bin_file.sig --clobber
 
-      - name: download and update latest.json for Windows portable release
-        if: matrix.config.os == 'windows-latest'
+  update-latest-json:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [get-release, build-tauri]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: prepare latest.json baseline
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
         run: |
-          curl -sL https://github.com/readest/readest/releases/latest/download/latest.json -o latest.json
+          set -euo pipefail
+          tag="${{ needs.get-release.outputs.release_tag }}"
 
-          version=${{ needs.get-release.outputs.release_version }}
-          arch=${{ matrix.config.arch }}
-
-          if [ "$arch" = "x86_64" ]; then
-            bin_file="Readest_${version}_x64-portable.exe"
-            platform_key="windows-x86_64-portable"
-          elif [ "$arch" = "aarch64" ]; then
-            bin_file="Readest_${version}_arm64-portable.exe"
-            platform_key="windows-aarch64-portable"
+          if gh release download "$tag" --pattern "latest.json" --dir .; then
+            echo "Use existing latest.json from current tag release"
           else
-            echo "Unknown architecture: $arch"
+            echo "No latest.json on current tag release, fallback to latest release"
+            curl -sL https://github.com/readest/readest/releases/latest/download/latest.json -o latest.json
+          fi
+
+      - name: download updater signatures from current release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.get-release.outputs.release_tag }}"
+          version="${{ needs.get-release.outputs.release_version }}"
+
+          gh release download "$tag" --pattern "Readest_${version}_universal.apk.sig" --dir .
+          gh release download "$tag" --pattern "Readest_${version}_arm64.apk.sig" --dir .
+          gh release download "$tag" --pattern "Readest_${version}_x64-portable.exe.sig" --dir .
+          gh release download "$tag" --pattern "Readest_${version}_arm64-portable.exe.sig" --dir .
+
+      - name: update latest.json once for all updater platforms
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.get-release.outputs.release_tag }}"
+          version="${{ needs.get-release.outputs.release_version }}"
+
+          android_universal_url="https://github.com/readest/readest/releases/download/${tag}/Readest_${version}_universal.apk"
+          android_arm64_url="https://github.com/readest/readest/releases/download/${tag}/Readest_${version}_arm64.apk"
+          windows_x64_portable_url="https://github.com/readest/readest/releases/download/${tag}/Readest_${version}_x64-portable.exe"
+          windows_arm64_portable_url="https://github.com/readest/readest/releases/download/${tag}/Readest_${version}_arm64-portable.exe"
+
+          android_universal_sig=$(cat "Readest_${version}_universal.apk.sig")
+          android_arm64_sig=$(cat "Readest_${version}_arm64.apk.sig")
+          windows_x64_portable_sig=$(cat "Readest_${version}_x64-portable.exe.sig")
+          windows_arm64_portable_sig=$(cat "Readest_${version}_arm64-portable.exe.sig")
+
+          jq \
+            --arg android_universal_url "$android_universal_url" \
+            --arg android_universal_sig "$android_universal_sig" \
+            --arg android_arm64_url "$android_arm64_url" \
+            --arg android_arm64_sig "$android_arm64_sig" \
+            --arg windows_x64_portable_url "$windows_x64_portable_url" \
+            --arg windows_x64_portable_sig "$windows_x64_portable_sig" \
+            --arg windows_arm64_portable_url "$windows_arm64_portable_url" \
+            --arg windows_arm64_portable_sig "$windows_arm64_portable_sig" \
+            '.platforms["android-universal"] = {signature: $android_universal_sig, url: $android_universal_url}
+             | .platforms["android-arm64"] = {signature: $android_arm64_sig, url: $android_arm64_url}
+             | .platforms["windows-x86_64-portable"] = {signature: $windows_x64_portable_sig, url: $windows_x64_portable_url}
+             | .platforms["windows-aarch64-portable"] = {signature: $windows_arm64_portable_sig, url: $windows_arm64_portable_url}' \
+            latest.json > tmp.$$.json && mv tmp.$$.json latest.json
+
+          echo "Uploading updated latest.json to GitHub release"
+          gh release upload "$tag" latest.json --clobber
+
+  validate-latest-json-platform-assets:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [get-release, update-latest-json]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: validate latest.json platform keys and release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release_tag="${{ needs.get-release.outputs.release_tag }}"
+          release_version="${{ needs.get-release.outputs.release_version }}"
+
+          gh release download "$release_tag" --pattern "latest.json" --dir . --clobber
+          gh api "repos/${{ github.repository }}/releases/tags/${release_tag}" > release.json
+
+          failed=0
+          latest_version=$(jq -r '.version // empty' latest.json)
+          if [ -z "$latest_version" ]; then
+            echo "::error::latest.json.version is empty."
+            failed=1
+          elif [ "$latest_version" != "$release_version" ]; then
+            echo "::error::latest.json.version ($latest_version) does not match release version ($release_version)."
+            failed=1
+          fi
+
+          required_keys=(
+            "android-universal"
+            "android-arm64"
+            "windows-x86_64-portable"
+            "windows-aarch64-portable"
+            "linux-x86_64-appimage"
+            "linux-aarch64-appimage"
+          )
+
+          echo "Required latest.json platform keys:"
+          printf ' - %s\n' "${required_keys[@]}"
+
+          for key in "${required_keys[@]}"; do
+            url=$(jq -r --arg key "$key" '.platforms[$key].url // empty' latest.json)
+            signature=$(jq -r --arg key "$key" '.platforms[$key].signature // empty' latest.json)
+
+            if [ -z "$url" ]; then
+              echo "::error::latest.json.platforms[\"${key}\"].url is empty."
+              failed=1
+              continue
+            fi
+
+            if [ -z "$signature" ]; then
+              echo "::error::latest.json.platforms[\"${key}\"].signature is empty."
+              failed=1
+            fi
+
+            asset_name=$(basename "${url%%\?*}")
+            if ! jq -e --arg asset_name "$asset_name" '.assets[].name | select(. == $asset_name)' release.json >/dev/null; then
+              echo "::error::latest.json.platforms[\"${key}\"].url points to missing release asset: ${asset_name}."
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::latest.json platform validation failed."
             exit 1
           fi
 
-          portable_url="https://github.com/readest/readest/releases/download/${{ needs.get-release.outputs.release_tag }}/$bin_file"
-          portable_sig=$(cat $bin_file.sig)
+          echo "latest.json platform validation passed."
 
-          jq --arg url "$portable_url" \
-              --arg sig "$portable_sig" \
-              --arg key "$platform_key" \
-              '.platforms[$key] = {signature: $sig, url: $url}' latest.json > tmp.$$.json && mv tmp.$$.json latest.json
+  verify-release-assets:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs:
+      [
+        get-release,
+        build-koreader-plugin,
+        build-tauri,
+        update-latest-json,
+        validate-latest-json-platform-assets,
+      ]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: verify critical release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release_tag="${{ needs.get-release.outputs.release_tag }}"
+          api_url="repos/${{ github.repository }}/releases/tags/${release_tag}"
+          gh api "$api_url" > release.json
 
-          echo "Uploading updated latest.json to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} latest.json --clobber
+          echo "Release assets for ${release_tag}:"
+          jq -r '.assets[].name' release.json
+
+          has_windows_installer=$(jq '[.assets[].name | select(test("(?i)\\.exe$") and (test("portable"; "i") | not))] | length > 0' release.json)
+          has_windows_portable=$(jq '[.assets[].name | select(test("portable"; "i") and test("(?i)\\.exe$"))] | length > 0' release.json)
+          has_android_universal=$(jq '[.assets[].name | select(test("^Readest_.*_universal\\.apk$"))] | length > 0' release.json)
+          has_android_arm64=$(jq '[.assets[].name | select(test("^Readest_.*_arm64\\.apk$"))] | length > 0' release.json)
+
+          missing=0
+          if [ "$has_windows_installer" != "true" ]; then
+            echo "::error::Missing Windows installer asset (*.exe without portable marker)."
+            missing=1
+          fi
+          if [ "$has_windows_portable" != "true" ]; then
+            echo "::error::Missing Windows portable asset (*portable*.exe)."
+            missing=1
+          fi
+          if [ "$has_android_universal" != "true" ]; then
+            echo "::error::Missing Android universal asset (*_universal.apk)."
+            missing=1
+          fi
+          if [ "$has_android_arm64" != "true" ]; then
+            echo "::error::Missing Android arm64 asset (*_arm64.apk)."
+            missing=1
+          fi
+
+          if [ "$missing" -ne 0 ]; then
+            echo "Critical release assets verification failed."
+            exit 1
+          fi
+
+          echo "Critical release assets verification passed."
 
   upload-to-r2:
-    needs: [get-release, build-tauri]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [get-release, build-tauri, update-latest-json, verify-release-assets]
     uses: ./.github/workflows/upload-to-r2.yml
     with:
       tag: ${{ needs.get-release.outputs.release_tag }}
     secrets: inherit
+
+  publish-release:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs:
+      [
+        get-release,
+        update-release,
+        build-koreader-plugin,
+        build-tauri,
+        update-latest-json,
+        verify-release-assets,
+        upload-to-r2,
+      ]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: publish release
+        uses: actions/github-script@v8
+        env:
+          release_id: ${{ needs.get-release.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.release_id),
+              draft: false,
+              prerelease: false
+            });

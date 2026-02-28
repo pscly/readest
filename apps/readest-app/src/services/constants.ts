@@ -74,6 +74,7 @@ export const DEFAULT_READWISE_SETTINGS = {
 } as ReadwiseSettings;
 
 export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
+  syncBackend: 'cloud' as SystemSettings['syncBackend'],
   keepLogin: false,
   autoUpload: true,
   alwaysOnTop: false,

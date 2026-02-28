@@ -283,12 +283,16 @@ pub async fn upload_file(
     file_path: &str,
     method: &str,
     headers: HashMap<String, String>,
+    skip_ssl_verification: Option<bool>,
     on_progress: Channel<ProgressPayload>,
 ) -> Result<String> {
     let file = File::open(file_path).await?;
     let file_len = file.metadata().await.unwrap().len();
 
-    let client = reqwest::Client::new();
+    let client = reqwest::ClientBuilder::new()
+        .danger_accept_invalid_certs(skip_ssl_verification.unwrap_or(false))
+        .danger_accept_invalid_hostnames(skip_ssl_verification.unwrap_or(false))
+        .build()?;
     let mut request = match method.to_uppercase().as_str() {
         "POST" => client.post(url),
         "PUT" => client.put(url),
