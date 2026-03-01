@@ -151,55 +151,57 @@ jobs:
               core.info(`Created draft release for tag ${tag}: ${release.id}`);
             }
 
-            const maxVerifyAttempts = 8;
+            const maxVerifyAttempts = 12;
             const verifyDelayMs = 3000;
+            let verifiedByTag = false;
 
             for (let attempt = 1; attempt <= maxVerifyAttempts; attempt++) {
-              let freshRelease;
-
+              let releaseByTag;
               try {
-                const response = await github.rest.repos.getRelease({
-                  owner,
-                  repo,
-                  release_id: release.id,
-                });
-                freshRelease = response.data;
+                const byTagResponse = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+                releaseByTag = byTagResponse.data;
               } catch (error) {
                 if (error.status !== 404) {
                   throw error;
                 }
-                if (attempt === maxVerifyAttempts) {
-                  throw new Error(`Release ${release.id} is not readable after ${maxVerifyAttempts * verifyDelayMs / 1000}s`);
-                }
-                core.info(`Release ${release.id} not readable yet (attempt ${attempt}/${maxVerifyAttempts}), retry in ${verifyDelayMs / 1000}s`);
-                await sleep(verifyDelayMs);
-                continue;
+                core.warning(`getReleaseByTag(${tag}) returned 404 (attempt ${attempt}/${maxVerifyAttempts})`);
               }
 
-              if (freshRelease.tag_name === tag) {
-                release = freshRelease;
-                core.info(`Verified release ${release.id} is bound to tag ${tag}`);
+              if (releaseByTag && releaseByTag.id === release.id && releaseByTag.tag_name === tag) {
+                release = releaseByTag;
+                verifiedByTag = true;
+                core.info(`Verified release ${release.id} is reachable by tag ${tag}`);
                 break;
               }
 
-              core.warning(`Release ${freshRelease.id} has tag_name=${freshRelease.tag_name}, expected ${tag}; correcting (attempt ${attempt}/${maxVerifyAttempts})`);
-              await github.rest.repos.updateRelease({
-                owner,
-                repo,
-                release_id: freshRelease.id,
-                tag_name: tag,
-                draft: true,
-                prerelease: false,
-              });
-              release = freshRelease;
+              if (releaseByTag) {
+                core.warning(`getReleaseByTag(${tag}) returned release id=${releaseByTag.id}, tag_name=${releaseByTag.tag_name}; expected id=${release.id}, tag_name=${tag} (attempt ${attempt}/${maxVerifyAttempts})`);
+              }
+
+              core.warning(`Re-applying tag ${tag} to release ${release.id} (attempt ${attempt}/${maxVerifyAttempts})`);
+              try {
+                await github.rest.repos.updateRelease({
+                  owner,
+                  repo,
+                  release_id: release.id,
+                  tag_name: tag,
+                  draft: true,
+                  prerelease: false,
+                });
+              } catch (error) {
+                if (![404, 409, 422].includes(error.status)) {
+                  throw error;
+                }
+                core.warning(`updateRelease for release ${release.id} failed with status ${error.status}; will retry`);
+              }
 
               if (attempt < maxVerifyAttempts) {
                 await sleep(verifyDelayMs);
               }
             }
 
-            if (!release || release.tag_name !== tag) {
-              throw new Error(`Release tag assertion failed: expected ${tag}, got ${release?.tag_name ?? 'unknown'}`);
+            if (!verifiedByTag || !release || release.tag_name !== tag) {
+              throw new Error(`Release tag verification failed: release ${release?.id ?? 'unknown'} is not stably reachable by tag ${tag}`);
             }
 
             core.setOutput('release_id', String(release.id));
