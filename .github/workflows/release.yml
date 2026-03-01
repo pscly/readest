@@ -180,6 +180,7 @@ jobs:
             local sleep_seconds=2
             local last_err=""
             local upload_err
+            local tag_name
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -198,6 +199,11 @@ jobs:
               echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
               return 1
             fi
+            tag_name=$(jq -r '.tag_name // empty' <<<"$release_json")
+            if [ -z "$tag_name" ]; then
+              echo "::error::Failed to resolve tag_name from release ${release_id}."
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -206,7 +212,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
+              if upload_err=$(gh release upload -R "${GITHUB_REPOSITORY}" --clobber "${tag_name}" "${file_path}#${asset_name}" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
@@ -259,6 +265,7 @@ jobs:
             local sleep_seconds=2
             local last_err=""
             local upload_err
+            local tag_name
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -277,6 +284,11 @@ jobs:
               echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
               return 1
             fi
+            tag_name=$(jq -r '.tag_name // empty' <<<"$release_json")
+            if [ -z "$tag_name" ]; then
+              echo "::error::Failed to resolve tag_name from release ${release_id}."
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -285,7 +297,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
+              if upload_err=$(gh release upload -R "${GITHUB_REPOSITORY}" --clobber "${tag_name}" "${file_path}#${asset_name}" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
@@ -480,6 +492,7 @@ jobs:
             local sleep_seconds=2
             local last_err=""
             local upload_err
+            local tag_name
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -498,6 +511,11 @@ jobs:
               echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
               return 1
             fi
+            tag_name=$(jq -r '.tag_name // empty' <<<"$release_json")
+            if [ -z "$tag_name" ]; then
+              echo "::error::Failed to resolve tag_name from release ${release_id}."
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -506,7 +524,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
+              if upload_err=$(gh release upload -R "${GITHUB_REPOSITORY}" --clobber "${tag_name}" "${file_path}#${asset_name}" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
@@ -645,6 +663,7 @@ jobs:
             local sleep_seconds=2
             local last_err=""
             local upload_err
+            local tag_name
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -663,6 +682,11 @@ jobs:
               echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
               return 1
             fi
+            tag_name=$(jq -r '.tag_name // empty' <<<"$release_json")
+            if [ -z "$tag_name" ]; then
+              echo "::error::Failed to resolve tag_name from release ${release_id}."
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -671,7 +695,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
+              if upload_err=$(gh release upload -R "${GITHUB_REPOSITORY}" --clobber "${tag_name}" "${file_path}#${asset_name}" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
@@ -788,6 +812,7 @@ jobs:
             local sleep_seconds=2
             local last_err=""
             local upload_err
+            local tag_name
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -806,6 +831,11 @@ jobs:
               echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
               return 1
             fi
+            tag_name=$(jq -r '.tag_name // empty' <<<"$release_json")
+            if [ -z "$tag_name" ]; then
+              echo "::error::Failed to resolve tag_name from release ${release_id}."
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -814,7 +844,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
+              if upload_err=$(gh release upload -R "${GITHUB_REPOSITORY}" --clobber "${tag_name}" "${file_path}#${asset_name}" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
