@@ -175,9 +175,28 @@ jobs:
             local encoded_name
             local release_json
             local existing_asset_id
+            local attempt
+            local max_attempts=10
+            local sleep_seconds=2
+            local last_err=""
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
-            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
+            for attempt in $(seq 1 "$max_attempts"); do
+              if release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" 2>&1); then
+                break
+              fi
+              last_err="$release_json"
+              release_json=""
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Release ${release_id} not readable yet (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            if [ -z "${release_json:-}" ]; then
+              echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -222,9 +241,28 @@ jobs:
             local encoded_name
             local release_json
             local existing_asset_id
+            local attempt
+            local max_attempts=10
+            local sleep_seconds=2
+            local last_err=""
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
-            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
+            for attempt in $(seq 1 "$max_attempts"); do
+              if release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" 2>&1); then
+                break
+              fi
+              last_err="$release_json"
+              release_json=""
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Release ${release_id} not readable yet (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            if [ -z "${release_json:-}" ]; then
+              echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -411,9 +449,28 @@ jobs:
             local encoded_name
             local release_json
             local existing_asset_id
+            local attempt
+            local max_attempts=10
+            local sleep_seconds=2
+            local last_err=""
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
-            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
+            for attempt in $(seq 1 "$max_attempts"); do
+              if release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" 2>&1); then
+                break
+              fi
+              last_err="$release_json"
+              release_json=""
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Release ${release_id} not readable yet (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            if [ -z "${release_json:-}" ]; then
+              echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -544,9 +601,28 @@ jobs:
             local encoded_name
             local release_json
             local existing_asset_id
+            local attempt
+            local max_attempts=10
+            local sleep_seconds=2
+            local last_err=""
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
-            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
+            for attempt in $(seq 1 "$max_attempts"); do
+              if release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" 2>&1); then
+                break
+              fi
+              last_err="$release_json"
+              release_json=""
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Release ${release_id} not readable yet (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            if [ -z "${release_json:-}" ]; then
+              echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
@@ -655,9 +731,28 @@ jobs:
             local encoded_name
             local release_json
             local existing_asset_id
+            local attempt
+            local max_attempts=10
+            local sleep_seconds=2
+            local last_err=""
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
-            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
+            for attempt in $(seq 1 "$max_attempts"); do
+              if release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" 2>&1); then
+                break
+              fi
+              last_err="$release_json"
+              release_json=""
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Release ${release_id} not readable yet (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            if [ -z "${release_json:-}" ]; then
+              echo "::error::Failed to read release JSON for ${release_id} after ${max_attempts} attempts. Last error: ${last_err}"
+              return 1
+            fi
             existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
 
             if [ -n "$existing_asset_id" ]; then
