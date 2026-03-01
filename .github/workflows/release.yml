@@ -76,15 +76,61 @@ jobs:
           RELEASE_TAG: ${{ steps['resolve-release-tag'].outputs.release_tag }}
         with:
           script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
             const tag = process.env.RELEASE_TAG;
+            const ref = `tags/${tag}`;
+            const fullRef = `refs/tags/${tag}`;
+            const isDispatch = context.eventName === 'workflow_dispatch';
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            const ensureTagRefVisible = async () => {
+              const maxAttempts = 12;
+              const delayMs = 5000;
+
+              for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                  const refResponse = await github.rest.git.getRef({ owner, repo, ref });
+                  core.info(`Tag ref ${fullRef} is visible at ${refResponse.data.object.sha}`);
+                  return;
+                } catch (error) {
+                  if (error.status !== 404) {
+                    throw error;
+                  }
+
+                  if (isDispatch) {
+                    try {
+                      await github.rest.git.createRef({
+                        owner,
+                        repo,
+                        ref: fullRef,
+                        sha: context.sha,
+                      });
+                      core.info(`Created missing tag ref ${fullRef} at ${context.sha}`);
+                    } catch (createError) {
+                      if (createError.status !== 422) {
+                        throw createError;
+                      }
+                      core.info(`Tag ref ${fullRef} already exists or was created concurrently`);
+                    }
+                  }
+
+                  if (attempt === maxAttempts) {
+                    throw new Error(`Tag ref ${fullRef} is not visible after ${maxAttempts * delayMs / 1000}s`);
+                  }
+
+                  core.info(`Tag ref ${fullRef} not visible yet (attempt ${attempt}/${maxAttempts}), retry in ${delayMs / 1000}s`);
+                  await sleep(delayMs);
+                }
+              }
+            };
+
+            await ensureTagRefVisible();
+
             let release;
 
             try {
-              const response = await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag,
-              });
+              const response = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
               release = response.data;
               core.info(`Found existing release for tag ${tag}: ${release.id}`);
             } catch (error) {
@@ -93,8 +139,8 @@ jobs:
               }
 
               const response = await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
+                owner,
+                repo,
                 tag_name: tag,
                 name: `Readest ${tag}`,
                 draft: true,
@@ -105,17 +151,55 @@ jobs:
               core.info(`Created draft release for tag ${tag}: ${release.id}`);
             }
 
-            if (release.tag_name !== tag) {
+            const maxVerifyAttempts = 8;
+            const verifyDelayMs = 3000;
+
+            for (let attempt = 1; attempt <= maxVerifyAttempts; attempt++) {
+              let freshRelease;
+
+              try {
+                const response = await github.rest.repos.getRelease({
+                  owner,
+                  repo,
+                  release_id: release.id,
+                });
+                freshRelease = response.data;
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+                if (attempt === maxVerifyAttempts) {
+                  throw new Error(`Release ${release.id} is not readable after ${maxVerifyAttempts * verifyDelayMs / 1000}s`);
+                }
+                core.info(`Release ${release.id} not readable yet (attempt ${attempt}/${maxVerifyAttempts}), retry in ${verifyDelayMs / 1000}s`);
+                await sleep(verifyDelayMs);
+                continue;
+              }
+
+              if (freshRelease.tag_name === tag) {
+                release = freshRelease;
+                core.info(`Verified release ${release.id} is bound to tag ${tag}`);
+                break;
+              }
+
+              core.warning(`Release ${freshRelease.id} has tag_name=${freshRelease.tag_name}, expected ${tag}; correcting (attempt ${attempt}/${maxVerifyAttempts})`);
               await github.rest.repos.updateRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: release.id,
+                owner,
+                repo,
+                release_id: freshRelease.id,
                 tag_name: tag,
                 draft: true,
                 prerelease: false,
               });
-              release.tag_name = tag;
-              core.info(`Corrected release tag_name to ${tag} for release ${release.id}`);
+              release = freshRelease;
+
+              if (attempt < maxVerifyAttempts) {
+                await sleep(verifyDelayMs);
+              }
+            }
+
+            if (!release || release.tag_name !== tag) {
+              throw new Error(`Release tag assertion failed: expected ${tag}, got ${release?.tag_name ?? 'unknown'}`);
             }
 
             core.setOutput('release_id', String(release.id));
