@@ -23,7 +23,7 @@ export const metadata = {
   authors: [
     {
       name: 'readest',
-      url: 'https://github.com/readest/readest',
+      url: 'https://github.com/pscly/readest',
     },
   ],
   icons: [

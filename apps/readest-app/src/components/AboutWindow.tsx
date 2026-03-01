@@ -144,7 +144,7 @@ export const AboutWindow = () => {
             </p>
             <p className='text-neutral-content text-xs'>
               Source code is available at{' '}
-              <Link href='https://github.com/readest/readest' className='text-blue-500 underline'>
+              <Link href='https://github.com/pscly/readest' className='text-blue-500 underline'>
                 GitHub
               </Link>
               .
