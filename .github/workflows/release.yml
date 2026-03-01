@@ -179,6 +179,7 @@ jobs:
             local max_attempts=10
             local sleep_seconds=2
             local last_err=""
+            local upload_err
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -203,7 +204,19 @@ jobs:
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
             fi
 
-            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+            last_err=""
+            for attempt in $(seq 1 "$max_attempts"); do
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+                return 0
+              fi
+              last_err="$upload_err"
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Upload ${asset_name} failed (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            echo "::error::Failed to upload asset ${asset_name} after ${max_attempts} attempts. Last error: ${last_err}"
+            return 1
           }
 
           release_id="${{ needs['get-release'].outputs.release_id }}"
@@ -245,6 +258,7 @@ jobs:
             local max_attempts=10
             local sleep_seconds=2
             local last_err=""
+            local upload_err
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -269,7 +283,19 @@ jobs:
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
             fi
 
-            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+            last_err=""
+            for attempt in $(seq 1 "$max_attempts"); do
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+                return 0
+              fi
+              last_err="$upload_err"
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Upload ${asset_name} failed (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            echo "::error::Failed to upload asset ${asset_name} after ${max_attempts} attempts. Last error: ${last_err}"
+            return 1
           }
 
           release_id="${{ needs['get-release'].outputs.release_id }}"
@@ -453,6 +479,7 @@ jobs:
             local max_attempts=10
             local sleep_seconds=2
             local last_err=""
+            local upload_err
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -477,7 +504,19 @@ jobs:
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
             fi
 
-            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+            last_err=""
+            for attempt in $(seq 1 "$max_attempts"); do
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+                return 0
+              fi
+              last_err="$upload_err"
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Upload ${asset_name} failed (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            echo "::error::Failed to upload asset ${asset_name} after ${max_attempts} attempts. Last error: ${last_err}"
+            return 1
           }
 
           release_id="${{ needs['get-release'].outputs.release_id }}"
@@ -605,6 +644,7 @@ jobs:
             local max_attempts=10
             local sleep_seconds=2
             local last_err=""
+            local upload_err
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -629,7 +669,19 @@ jobs:
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
             fi
 
-            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+            last_err=""
+            for attempt in $(seq 1 "$max_attempts"); do
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+                return 0
+              fi
+              last_err="$upload_err"
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Upload ${asset_name} failed (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            echo "::error::Failed to upload asset ${asset_name} after ${max_attempts} attempts. Last error: ${last_err}"
+            return 1
           }
 
           release_id="${{ needs['get-release'].outputs.release_id }}"
@@ -735,6 +787,7 @@ jobs:
             local max_attempts=10
             local sleep_seconds=2
             local last_err=""
+            local upload_err
 
             encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
             # GitHub API can be eventually consistent; freshly created releases may 404 briefly.
@@ -759,7 +812,19 @@ jobs:
               gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
             fi
 
-            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+            last_err=""
+            for attempt in $(seq 1 "$max_attempts"); do
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+                return 0
+              fi
+              last_err="$upload_err"
+              if [ "$attempt" -lt "$max_attempts" ]; then
+                echo "Upload ${asset_name} failed (attempt ${attempt}/${max_attempts}); sleep ${sleep_seconds}s and retry..."
+                sleep "$sleep_seconds"
+              fi
+            done
+            echo "::error::Failed to upload asset ${asset_name} after ${max_attempts} attempts. Last error: ${last_err}"
+            return 1
           }
 
           release_id="${{ needs['get-release'].outputs.release_id }}"
