@@ -132,23 +132,47 @@ jobs:
             try {
               const response = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
               release = response.data;
-              core.info(`Found existing release for tag ${tag}: ${release.id}`);
+              core.info(`Found existing release by tag ${tag}: ${release.id}`);
             } catch (error) {
               if (error.status !== 404) {
                 throw error;
               }
 
-              const response = await github.rest.repos.createRelease({
+              const releases = await github.paginate(github.rest.repos.listReleases, {
                 owner,
                 repo,
-                tag_name: tag,
-                name: `Readest ${tag}`,
-                draft: true,
-                prerelease: false,
-                generate_release_notes: false,
+                per_page: 100,
               });
-              release = response.data;
-              core.info(`Created draft release for tag ${tag}: ${release.id}`);
+              const matchedRelease = releases.find((item) => item.tag_name === tag);
+
+              if (matchedRelease) {
+                release = matchedRelease;
+                core.info(`Found release by listReleases for tag ${tag}: ${release.id} (draft=${release.draft}, prerelease=${release.prerelease})`);
+                if (release.draft) {
+                  const updated = await github.rest.repos.updateRelease({
+                    owner,
+                    repo,
+                    release_id: release.id,
+                    tag_name: tag,
+                    draft: false,
+                    prerelease: true,
+                  });
+                  release = updated.data;
+                  core.info(`Promoted draft release ${release.id} to prerelease for tag ${tag}`);
+                }
+              } else {
+                const created = await github.rest.repos.createRelease({
+                  owner,
+                  repo,
+                  tag_name: tag,
+                  name: `Readest ${tag}`,
+                  draft: false,
+                  prerelease: true,
+                  generate_release_notes: false,
+                });
+                release = created.data;
+                core.info(`Created prerelease for tag ${tag}: ${release.id}`);
+              }
             }
 
             const maxVerifyAttempts = 12;
@@ -176,23 +200,6 @@ jobs:
 
               if (releaseByTag) {
                 core.warning(`getReleaseByTag(${tag}) returned release id=${releaseByTag.id}, tag_name=${releaseByTag.tag_name}; expected id=${release.id}, tag_name=${tag} (attempt ${attempt}/${maxVerifyAttempts})`);
-              }
-
-              core.warning(`Re-applying tag ${tag} to release ${release.id} (attempt ${attempt}/${maxVerifyAttempts})`);
-              try {
-                await github.rest.repos.updateRelease({
-                  owner,
-                  repo,
-                  release_id: release.id,
-                  tag_name: tag,
-                  draft: true,
-                  prerelease: false,
-                });
-              } catch (error) {
-                if (![404, 409, 422].includes(error.status)) {
-                  throw error;
-                }
-                core.warning(`updateRelease for release ${release.id} failed with status ${error.status}; will retry`);
               }
 
               if (attempt < maxVerifyAttempts) {
