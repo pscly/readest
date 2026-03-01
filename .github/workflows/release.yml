@@ -102,8 +102,21 @@ jobs:
               core.info(`Created draft release for tag ${tag}: ${release.id}`);
             }
 
+            if (release.tag_name !== tag) {
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+                tag_name: tag,
+                draft: true,
+                prerelease: false,
+              });
+              release.tag_name = tag;
+              core.info(`Corrected release tag_name to ${tag} for release ${release.id}`);
+            }
+
             core.setOutput('release_id', String(release.id));
-            core.setOutput('release_tag', release.tag_name);
+            core.setOutput('release_tag', tag);
 
   update-release:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -150,6 +163,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+
+          api_upload_asset() {
+            local release_id="$1"
+            local file_path="$2"
+            local asset_name="$3"
+            local encoded_name
+            local release_json
+            local existing_asset_id
+
+            encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
+
+            if [ -n "$existing_asset_id" ]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
+            fi
+
+            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+          }
+
+          release_id="${{ needs.get-release.outputs.release_id }}"
           version=${{ needs.get-release.outputs.release_version }}
           plugin_zip="Readest-${version}-1.koplugin.zip"
           meta_file="apps/readest.koplugin/_meta.lua"
@@ -160,7 +195,47 @@ jobs:
           cd ..
 
           echo "Uploading ${plugin_zip} to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} ${plugin_zip} --clobber
+          api_upload_asset "$release_id" "$plugin_zip" "$plugin_zip"
+
+  upload-release-metadata:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: get-release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: upload release notes metadata asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          api_upload_asset() {
+            local release_id="$1"
+            local file_path="$2"
+            local asset_name="$3"
+            local encoded_name
+            local release_json
+            local existing_asset_id
+
+            encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
+
+            if [ -n "$existing_asset_id" ]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
+            fi
+
+            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+          }
+
+          release_id="${{ needs.get-release.outputs.release_id }}"
+          file_path="apps/readest-app/release-notes.json"
+
+          echo "Uploading ${file_path} to GitHub release"
+          api_upload_asset "$release_id" "$file_path" "release-notes.json"
 
   build-tauri:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -319,22 +394,61 @@ jobs:
           $apksigner verify --verbose "$universial_apk"
           $apksigner verify --verbose "$arm64_apk"
 
+          api_upload_asset() {
+            local release_id="$1"
+            local file_path="$2"
+            local asset_name="$3"
+            local encoded_name
+            local release_json
+            local existing_asset_id
+
+            encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
+
+            if [ -n "$existing_asset_id" ]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
+            fi
+
+            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+          }
+
+          release_id="${{ needs.get-release.outputs.release_id }}"
+
           echo "Uploading $universial_apk to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk --clobber
+          api_upload_asset "$release_id" "$universial_apk" "$universial_apk"
           echo "Uploading $arm64_apk to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $arm64_apk --clobber
+          api_upload_asset "$release_id" "$arm64_apk" "$arm64_apk"
           echo "Uploading signatures to GitHub release"
           pnpm tauri signer sign $universial_apk
           pnpm tauri signer sign $arm64_apk
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $universial_apk.sig --clobber
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $arm64_apk.sig --clobber
+          api_upload_asset "$release_id" "$universial_apk.sig" "$universial_apk.sig"
+          api_upload_asset "$release_id" "$arm64_apk.sig" "$arm64_apk.sig"
 
       - name: Override tauri-cli with custom AppImage format (Linux)
         if: matrix.config.release == 'linux'
         run: cargo install tauri-cli --git https://github.com/tauri-apps/tauri --branch feat/truly-portable-appimage --force
 
-      - uses: tauri-apps/tauri-action@v0
-        if: matrix.config.release != 'android'
+      - name: build desktop bundles (non-macos)
+        if: matrix.config.release != 'android' && matrix.config.release != 'macos'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NODE_OPTIONS: '--max-old-space-size=8192'
+        with:
+          projectPath: apps/readest-app
+          releaseId: ${{ needs.get-release.outputs.release_id }}
+          releaseBody: ${{ needs.get-release.outputs.release_note }}
+          args: ${{ matrix.config.args || '' }}
+
+      - name: build macOS bundles (signed)
+        id: tauri-build-macos-signed
+        if: matrix.config.release == 'macos' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != ''
+        continue-on-error: true
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
@@ -353,12 +467,30 @@ jobs:
           releaseBody: ${{ needs.get-release.outputs.release_note }}
           args: ${{ matrix.config.args || '' }}
 
-      - name: upload release notes to GitHub release
+      - name: build macOS bundles (unsigned fallback)
+        if: >
+          matrix.config.release == 'macos' &&
+          (
+            secrets.APPLE_CERTIFICATE == '' ||
+            secrets.APPLE_CERTIFICATE_PASSWORD == '' ||
+            secrets.APPLE_SIGNING_IDENTITY == '' ||
+            secrets.APPLE_ID == '' ||
+            secrets.APPLE_PASSWORD == '' ||
+            secrets.APPLE_TEAM_ID == '' ||
+            steps.tauri-build-macos-signed.outcome == 'failure'
+          )
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Uploading release notes to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} apps/readest-app/release-notes.json --clobber
+          TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NODE_OPTIONS: '--max-old-space-size=8192'
+        with:
+          projectPath: apps/readest-app
+          releaseId: ${{ needs.get-release.outputs.release_id }}
+          releaseBody: ${{ needs.get-release.outputs.release_note }}
+          args: ${{ matrix.config.args || '' }}
 
       - name: build and upload portable binaries (Windows only)
         if: matrix.config.os == 'windows-latest'
@@ -395,15 +527,36 @@ jobs:
           # powershell.exe -Command "Compress-Archive -Path $exe_file -DestinationPath $bin_file -Force"
           cp $exe_file $bin_file
 
+          api_upload_asset() {
+            local release_id="$1"
+            local file_path="$2"
+            local asset_name="$3"
+            local encoded_name
+            local release_json
+            local existing_asset_id
+
+            encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
+
+            if [ -n "$existing_asset_id" ]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
+            fi
+
+            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+          }
+
+          release_id="${{ needs.get-release.outputs.release_id }}"
+
           echo "Uploading $bin_file to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $bin_file --clobber
+          api_upload_asset "$release_id" "$bin_file" "$bin_file"
 
           echo "Signing portable binary"
           pushd apps/readest-app/
           pnpm tauri signer sign "../../$bin_file"
           popd
           echo "Uploading signature to GitHub release"
-          gh release upload ${{ needs.get-release.outputs.release_tag }} $bin_file.sig --clobber
+          api_upload_asset "$release_id" "$bin_file.sig" "$bin_file.sig"
 
   update-latest-json:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -417,13 +570,35 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="${{ needs.get-release.outputs.release_tag }}"
 
-          if gh release download "$tag" --pattern "latest.json" --dir .; then
-            echo "Use existing latest.json from current tag release"
+          api_download_asset() {
+            local release_id="$1"
+            local asset_name="$2"
+            local out_path="$3"
+            local release_json
+            local asset_id
+
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
+            if [ -z "$asset_id" ]; then
+              return 1
+            fi
+
+            gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$out_path"
+          }
+
+          current_release_id="${{ needs.get-release.outputs.release_id }}"
+
+          if api_download_asset "$current_release_id" "latest.json" "latest.json"; then
+            echo "Use existing latest.json from current release"
           else
-            echo "No latest.json on current tag release, fallback to latest release"
-            curl -sL https://github.com/readest/readest/releases/latest/download/latest.json -o latest.json
+            echo "No latest.json on current release, fallback to latest published release"
+            if latest_release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.id' 2>/dev/null); then
+              api_download_asset "$latest_release_id" "latest.json" "latest.json"
+            else
+              echo "::error::Cannot find latest published release to bootstrap latest.json"
+              exit 1
+            fi
           fi
 
       - name: download updater signatures from current release
@@ -431,26 +606,66 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="${{ needs.get-release.outputs.release_tag }}"
+
+          api_download_asset() {
+            local release_id="$1"
+            local asset_name="$2"
+            local out_path="$3"
+            local release_json
+            local asset_id
+
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
+            if [ -z "$asset_id" ]; then
+              echo "::error::Asset not found in release ${release_id}: ${asset_name}"
+              return 1
+            fi
+
+            gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$out_path"
+          }
+
+          release_id="${{ needs.get-release.outputs.release_id }}"
           version="${{ needs.get-release.outputs.release_version }}"
 
-          gh release download "$tag" --pattern "Readest_${version}_universal.apk.sig" --dir .
-          gh release download "$tag" --pattern "Readest_${version}_arm64.apk.sig" --dir .
-          gh release download "$tag" --pattern "Readest_${version}_x64-portable.exe.sig" --dir .
-          gh release download "$tag" --pattern "Readest_${version}_arm64-portable.exe.sig" --dir .
+          api_download_asset "$release_id" "Readest_${version}_universal.apk.sig" "Readest_${version}_universal.apk.sig"
+          api_download_asset "$release_id" "Readest_${version}_arm64.apk.sig" "Readest_${version}_arm64.apk.sig"
+          api_download_asset "$release_id" "Readest_${version}_x64-portable.exe.sig" "Readest_${version}_x64-portable.exe.sig"
+          api_download_asset "$release_id" "Readest_${version}_arm64-portable.exe.sig" "Readest_${version}_arm64-portable.exe.sig"
 
       - name: update latest.json once for all updater platforms
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+
+          api_upload_asset() {
+            local release_id="$1"
+            local file_path="$2"
+            local asset_name="$3"
+            local encoded_name
+            local release_json
+            local existing_asset_id
+
+            encoded_name=$(jq -rn --arg v "$asset_name" '$v|@uri')
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            existing_asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
+
+            if [ -n "$existing_asset_id" ]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${existing_asset_id}" >/dev/null
+            fi
+
+            gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
+          }
+
+          release_id="${{ needs.get-release.outputs.release_id }}"
           tag="${{ needs.get-release.outputs.release_tag }}"
           version="${{ needs.get-release.outputs.release_version }}"
+          repo="${{ github.repository }}"
 
-          android_universal_url="https://github.com/readest/readest/releases/download/${tag}/Readest_${version}_universal.apk"
-          android_arm64_url="https://github.com/readest/readest/releases/download/${tag}/Readest_${version}_arm64.apk"
-          windows_x64_portable_url="https://github.com/readest/readest/releases/download/${tag}/Readest_${version}_x64-portable.exe"
-          windows_arm64_portable_url="https://github.com/readest/readest/releases/download/${tag}/Readest_${version}_arm64-portable.exe"
+          android_universal_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_universal.apk"
+          android_arm64_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_arm64.apk"
+          windows_x64_portable_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_x64-portable.exe"
+          windows_arm64_portable_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_arm64-portable.exe"
 
           android_universal_sig=$(cat "Readest_${version}_universal.apk.sig")
           android_arm64_sig=$(cat "Readest_${version}_arm64.apk.sig")
@@ -473,7 +688,7 @@ jobs:
             latest.json > tmp.$$.json && mv tmp.$$.json latest.json
 
           echo "Uploading updated latest.json to GitHub release"
-          gh release upload "$tag" latest.json --clobber
+          api_upload_asset "$release_id" "latest.json" "latest.json"
 
   validate-latest-json-platform-assets:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
@@ -487,11 +702,29 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          release_tag="${{ needs.get-release.outputs.release_tag }}"
+
+          api_download_asset() {
+            local release_id="$1"
+            local asset_name="$2"
+            local out_path="$3"
+            local release_json
+            local asset_id
+
+            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
+            asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
+            if [ -z "$asset_id" ]; then
+              echo "::error::Asset not found in release ${release_id}: ${asset_name}"
+              return 1
+            fi
+
+            gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$out_path"
+          }
+
+          release_id="${{ needs.get-release.outputs.release_id }}"
           release_version="${{ needs.get-release.outputs.release_version }}"
 
-          gh release download "$release_tag" --pattern "latest.json" --dir . --clobber
-          gh api "repos/${{ github.repository }}/releases/tags/${release_tag}" > release.json
+          api_download_asset "$release_id" "latest.json" "latest.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > release.json
 
           failed=0
           latest_version=$(jq -r '.version // empty' latest.json)
@@ -563,11 +796,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          release_tag="${{ needs.get-release.outputs.release_tag }}"
-          api_url="repos/${{ github.repository }}/releases/tags/${release_tag}"
-          gh api "$api_url" > release.json
+          release_id="${{ needs.get-release.outputs.release_id }}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > release.json
 
-          echo "Release assets for ${release_tag}:"
+          echo "Release assets for release_id=${release_id}:"
           jq -r '.assets[].name' release.json
 
           has_windows_installer=$(jq '[.assets[].name | select(test("(?i)\\.exe$") and (test("portable"; "i") | not))] | length > 0' release.json)
@@ -601,21 +833,29 @@ jobs:
           echo "Critical release assets verification passed."
 
   upload-to-r2:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    needs: [get-release, build-tauri, update-latest-json, verify-release-assets]
+    if: >
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      secrets.RELEASE_R2_ACCOUNT_ID != '' &&
+      secrets.RELEASE_R2_ACCESS_KEY_ID != '' &&
+      secrets.RELEASE_R2_SECRET_ACCESS_KEY != ''
+    needs:
+      [get-release, build-tauri, upload-release-metadata, update-latest-json, verify-release-assets]
     uses: ./.github/workflows/upload-to-r2.yml
     with:
       tag: ${{ needs.get-release.outputs.release_tag }}
     secrets: inherit
 
   publish-release:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: >
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (needs.upload-to-r2.result == 'success' || needs.upload-to-r2.result == 'skipped')
     needs:
       [
         get-release,
         update-release,
         build-koreader-plugin,
         build-tauri,
+        upload-release-metadata,
         update-latest-json,
         verify-release-assets,
         upload-to-r2,

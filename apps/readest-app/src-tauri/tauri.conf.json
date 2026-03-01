@@ -165,10 +165,7 @@
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgyODNEMzREQURDREZDODkKUldTSi9NMnRUZE9EZ2xxaWN3SXlhUkpDY2FFb050dzUra3Y3WWt5aUZaSmFBc0VPK1V1djh0WkcK",
-      "endpoints": [
-        "https://download.readest.com/releases/latest.json",
-        "https://github.com/readest/readest/releases/latest/download/latest.json"
-      ]
+      "endpoints": ["https://github.com/pscly/readest/releases/latest/download/latest.json"]
     }
   }
 }
