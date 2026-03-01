@@ -20,10 +20,10 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     outputs:
-      release_id: ${{ steps.get-release.outputs.release_id }}
-      release_tag: ${{ steps.get-release.outputs.release_tag }}
-      release_note: ${{ steps.get-release-notes.outputs.release_note }}
-      release_version: ${{ steps.get-release-notes.outputs.release_version }}
+      release_id: ${{ steps['get-release'].outputs.release_id }}
+      release_tag: ${{ steps['get-release'].outputs.release_tag }}
+      release_note: ${{ steps['get-release-notes'].outputs.release_note }}
+      release_version: ${{ steps['get-release-notes'].outputs.release_version }}
 
     steps:
       - uses: actions/checkout@v6
@@ -46,7 +46,7 @@ jobs:
       - name: resolve release tag
         id: resolve-release-tag
         env:
-          RELEASE_VERSION: ${{ steps.get-release-notes.outputs.release_version }}
+          RELEASE_VERSION: ${{ steps['get-release-notes'].outputs.release_version }}
           INPUT_TAG: ${{ github.event.inputs.tag || '' }}
         run: |
           set -euo pipefail
@@ -70,7 +70,7 @@ jobs:
         id: get-release
         uses: actions/github-script@v8
         env:
-          RELEASE_TAG: ${{ steps.resolve-release-tag.outputs.release_tag }}
+          RELEASE_TAG: ${{ steps['resolve-release-tag'].outputs.release_tag }}
         with:
           script: |
             const tag = process.env.RELEASE_TAG;
@@ -130,9 +130,9 @@ jobs:
         id: update-release
         uses: actions/github-script@v8
         env:
-          release_id: ${{ needs.get-release.outputs.release_id }}
-          release_tag: ${{ needs.get-release.outputs.release_tag }}
-          release_note: ${{ needs.get-release.outputs.release_note }}
+          release_id: ${{ needs['get-release'].outputs.release_id }}
+          release_tag: ${{ needs['get-release'].outputs.release_tag }}
+          release_note: ${{ needs['get-release'].outputs.release_note }}
         with:
           script: |
             const { data } = await github.rest.repos.generateReleaseNotes({
@@ -184,8 +184,8 @@ jobs:
             gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
           }
 
-          release_id="${{ needs.get-release.outputs.release_id }}"
-          version=${{ needs.get-release.outputs.release_version }}
+          release_id="${{ needs['get-release'].outputs.release_id }}"
+          version=${{ needs['get-release'].outputs.release_version }}
           plugin_zip="Readest-${version}-1.koplugin.zip"
           meta_file="apps/readest.koplugin/_meta.lua"
           perl -i -pe "s/^}/    version = \"${version}\",\n}/" "${meta_file}"
@@ -231,7 +231,7 @@ jobs:
             gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
           }
 
-          release_id="${{ needs.get-release.outputs.release_id }}"
+          release_id="${{ needs['get-release'].outputs.release_id }}"
           file_path="apps/readest-app/release-notes.json"
 
           echo "Uploading ${file_path} to GitHub release"
@@ -380,7 +380,7 @@ jobs:
           echo "storeFile=$RUNNER_TEMP/keystore.jks" >> keystore.properties
 
           popd
-          version=${{ needs.get-release.outputs.release_version }}
+          version=${{ needs['get-release'].outputs.release_version }}
           apk_path=src-tauri/gen/android/app/build/outputs/apk/universal/release
           universial_apk=Readest_${version}_universal.apk
           arm64_apk=Readest_${version}_arm64.apk
@@ -413,7 +413,7 @@ jobs:
             gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
           }
 
-          release_id="${{ needs.get-release.outputs.release_id }}"
+          release_id="${{ needs['get-release'].outputs.release_id }}"
 
           echo "Uploading $universial_apk to GitHub release"
           api_upload_asset "$release_id" "$universial_apk" "$universial_apk"
@@ -440,8 +440,8 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=8192'
         with:
           projectPath: apps/readest-app
-          releaseId: ${{ needs.get-release.outputs.release_id }}
-          releaseBody: ${{ needs.get-release.outputs.release_note }}
+          releaseId: ${{ needs['get-release'].outputs.release_id }}
+          releaseBody: ${{ needs['get-release'].outputs.release_note }}
           args: ${{ matrix.config.args || '' }}
 
       - name: build macOS bundles (signed)
@@ -463,8 +463,8 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=8192'
         with:
           projectPath: apps/readest-app
-          releaseId: ${{ needs.get-release.outputs.release_id }}
-          releaseBody: ${{ needs.get-release.outputs.release_note }}
+          releaseId: ${{ needs['get-release'].outputs.release_id }}
+          releaseBody: ${{ needs['get-release'].outputs.release_note }}
           args: ${{ matrix.config.args || '' }}
 
       - name: build macOS bundles (unsigned fallback)
@@ -477,7 +477,7 @@ jobs:
             secrets.APPLE_ID == '' ||
             secrets.APPLE_PASSWORD == '' ||
             secrets.APPLE_TEAM_ID == '' ||
-            steps.tauri-build-macos-signed.outcome == 'failure'
+            steps['tauri-build-macos-signed'].outcome == 'failure'
           )
         uses: tauri-apps/tauri-action@v0
         env:
@@ -488,8 +488,8 @@ jobs:
           NODE_OPTIONS: '--max-old-space-size=8192'
         with:
           projectPath: apps/readest-app
-          releaseId: ${{ needs.get-release.outputs.release_id }}
-          releaseBody: ${{ needs.get-release.outputs.release_note }}
+          releaseId: ${{ needs['get-release'].outputs.release_id }}
+          releaseBody: ${{ needs['get-release'].outputs.release_note }}
           args: ${{ matrix.config.args || '' }}
 
       - name: build and upload portable binaries (Windows only)
@@ -510,7 +510,7 @@ jobs:
           popd
           echo "Uploading Portable Binaries"
           arch=${{ matrix.config.arch }}
-          version=${{ needs.get-release.outputs.release_version }}
+          version=${{ needs['get-release'].outputs.release_version }}
 
           if [ "$arch" = "x86_64" ]; then
             bin_file="Readest_${version}_x64-portable.exe"
@@ -546,7 +546,7 @@ jobs:
             gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
           }
 
-          release_id="${{ needs.get-release.outputs.release_id }}"
+          release_id="${{ needs['get-release'].outputs.release_id }}"
 
           echo "Uploading $bin_file to GitHub release"
           api_upload_asset "$release_id" "$bin_file" "$bin_file"
@@ -587,7 +587,7 @@ jobs:
             gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$out_path"
           }
 
-          current_release_id="${{ needs.get-release.outputs.release_id }}"
+          current_release_id="${{ needs['get-release'].outputs.release_id }}"
 
           if api_download_asset "$current_release_id" "latest.json" "latest.json"; then
             echo "Use existing latest.json from current release"
@@ -624,8 +624,8 @@ jobs:
             gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$out_path"
           }
 
-          release_id="${{ needs.get-release.outputs.release_id }}"
-          version="${{ needs.get-release.outputs.release_version }}"
+          release_id="${{ needs['get-release'].outputs.release_id }}"
+          version="${{ needs['get-release'].outputs.release_version }}"
 
           api_download_asset "$release_id" "Readest_${version}_universal.apk.sig" "Readest_${version}_universal.apk.sig"
           api_download_asset "$release_id" "Readest_${version}_arm64.apk.sig" "Readest_${version}_arm64.apk.sig"
@@ -657,9 +657,9 @@ jobs:
             gh api --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null
           }
 
-          release_id="${{ needs.get-release.outputs.release_id }}"
-          tag="${{ needs.get-release.outputs.release_tag }}"
-          version="${{ needs.get-release.outputs.release_version }}"
+          release_id="${{ needs['get-release'].outputs.release_id }}"
+          tag="${{ needs['get-release'].outputs.release_tag }}"
+          version="${{ needs['get-release'].outputs.release_version }}"
           repo="${{ github.repository }}"
 
           android_universal_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_universal.apk"
@@ -720,8 +720,8 @@ jobs:
             gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$out_path"
           }
 
-          release_id="${{ needs.get-release.outputs.release_id }}"
-          release_version="${{ needs.get-release.outputs.release_version }}"
+          release_id="${{ needs['get-release'].outputs.release_id }}"
+          release_version="${{ needs['get-release'].outputs.release_version }}"
 
           api_download_asset "$release_id" "latest.json" "latest.json"
           gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > release.json
@@ -796,7 +796,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          release_id="${{ needs.get-release.outputs.release_id }}"
+          release_id="${{ needs['get-release'].outputs.release_id }}"
           gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > release.json
 
           echo "Release assets for release_id=${release_id}:"
@@ -842,13 +842,13 @@ jobs:
       [get-release, build-tauri, upload-release-metadata, update-latest-json, verify-release-assets]
     uses: ./.github/workflows/upload-to-r2.yml
     with:
-      tag: ${{ needs.get-release.outputs.release_tag }}
+      tag: ${{ needs['get-release'].outputs.release_tag }}
     secrets: inherit
 
   publish-release:
     if: >
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      (needs.upload-to-r2.result == 'success' || needs.upload-to-r2.result == 'skipped')
+      (needs['upload-to-r2'].result == 'success' || needs['upload-to-r2'].result == 'skipped')
     needs:
       [
         get-release,
@@ -867,7 +867,7 @@ jobs:
       - name: publish release
         uses: actions/github-script@v8
         env:
-          release_id: ${{ needs.get-release.outputs.release_id }}
+          release_id: ${{ needs['get-release'].outputs.release_id }}
         with:
           script: |
             await github.rest.repos.updateRelease({
