@@ -206,7 +206,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
@@ -285,7 +285,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
@@ -506,7 +506,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
@@ -671,7 +671,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
@@ -814,7 +814,7 @@ jobs:
 
             last_err=""
             for attempt in $(seq 1 "$max_attempts"); do
-              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" >/dev/null 2>&1); then
+              if upload_err=$(gh api --hostname uploads.github.com --method POST -H "Content-Type: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${encoded_name}" --input "$file_path" 2>&1 >/dev/null); then
                 return 0
               fi
               last_err="$upload_err"
