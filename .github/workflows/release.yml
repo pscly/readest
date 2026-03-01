@@ -452,13 +452,6 @@ jobs:
 
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 60
-    env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v6
 
@@ -663,7 +656,7 @@ jobs:
 
       - name: build macOS bundles (signed)
         id: tauri-build-macos-signed
-        if: matrix.config.release == 'macos' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        if: matrix.config.release == 'macos' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != ''
         continue-on-error: true
         uses: tauri-apps/tauri-action@v0
         env:
@@ -685,29 +678,13 @@ jobs:
           args: ${{ matrix.config.args || '' }}
 
       - name: build macOS bundles (unsigned fallback)
-        if: >
-          matrix.config.release == 'macos' &&
-          (
-            env.APPLE_CERTIFICATE == '' ||
-            env.APPLE_CERTIFICATE_PASSWORD == '' ||
-            env.APPLE_SIGNING_IDENTITY == '' ||
-            env.APPLE_ID == '' ||
-            env.APPLE_PASSWORD == '' ||
-            env.APPLE_TEAM_ID == '' ||
-            steps['tauri-build-macos-signed'].outcome == 'failure'
-          )
+        if: matrix.config.release == 'macos' && steps['tauri-build-macos-signed'].outcome != 'success'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_BUNDLER_NEW_APPIMAGE_FORMAT: 'true'
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ''
-          APPLE_CERTIFICATE_PASSWORD: ''
-          APPLE_SIGNING_IDENTITY: ''
-          APPLE_ID: ''
-          APPLE_PASSWORD: ''
-          APPLE_TEAM_ID: ''
           NODE_OPTIONS: '--max-old-space-size=8192'
         with:
           projectPath: apps/readest-app
