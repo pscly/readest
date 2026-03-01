@@ -280,6 +280,13 @@ jobs:
 
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 60
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v6
 
@@ -446,7 +453,7 @@ jobs:
 
       - name: build macOS bundles (signed)
         id: tauri-build-macos-signed
-        if: matrix.config.release == 'macos' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != ''
+        if: matrix.config.release == 'macos' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != '' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_ID != '' && env.APPLE_PASSWORD != '' && env.APPLE_TEAM_ID != ''
         continue-on-error: true
         uses: tauri-apps/tauri-action@v0
         env:
@@ -471,12 +478,12 @@ jobs:
         if: >
           matrix.config.release == 'macos' &&
           (
-            secrets.APPLE_CERTIFICATE == '' ||
-            secrets.APPLE_CERTIFICATE_PASSWORD == '' ||
-            secrets.APPLE_SIGNING_IDENTITY == '' ||
-            secrets.APPLE_ID == '' ||
-            secrets.APPLE_PASSWORD == '' ||
-            secrets.APPLE_TEAM_ID == '' ||
+            env.APPLE_CERTIFICATE == '' ||
+            env.APPLE_CERTIFICATE_PASSWORD == '' ||
+            env.APPLE_SIGNING_IDENTITY == '' ||
+            env.APPLE_ID == '' ||
+            env.APPLE_PASSWORD == '' ||
+            env.APPLE_TEAM_ID == '' ||
             steps['tauri-build-macos-signed'].outcome == 'failure'
           )
         uses: tauri-apps/tauri-action@v0
@@ -835,9 +842,7 @@ jobs:
   upload-to-r2:
     if: >
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      secrets.RELEASE_R2_ACCOUNT_ID != '' &&
-      secrets.RELEASE_R2_ACCESS_KEY_ID != '' &&
-      secrets.RELEASE_R2_SECRET_ACCESS_KEY != ''
+      vars.ENABLE_R2_UPLOAD == 'true'
     needs:
       [get-release, build-tauri, upload-release-metadata, update-latest-json, verify-release-assets]
     uses: ./.github/workflows/upload-to-r2.yml
