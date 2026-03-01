@@ -452,6 +452,8 @@ jobs:
 
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 60
+    env:
+      APPLE_SIGNING_ENABLED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -656,7 +658,7 @@ jobs:
 
       - name: build macOS bundles (signed)
         id: tauri-build-macos-signed
-        if: matrix.config.release == 'macos' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != ''
+        if: ${{ matrix.config.release == 'macos' && env.APPLE_SIGNING_ENABLED == 'true' }}
         continue-on-error: true
         uses: tauri-apps/tauri-action@v0
         env:
@@ -678,7 +680,7 @@ jobs:
           args: ${{ matrix.config.args || '' }}
 
       - name: build macOS bundles (unsigned fallback)
-        if: matrix.config.release == 'macos' && steps['tauri-build-macos-signed'].outcome != 'success'
+        if: ${{ matrix.config.release == 'macos' && steps['tauri-build-macos-signed'].outcome != 'success' }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
