@@ -1123,7 +1123,15 @@ jobs:
 
   publish-release:
     if: >
+      always() &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs['get-release'].result == 'success' &&
+      needs['update-release'].result == 'success' &&
+      needs['build-koreader-plugin'].result == 'success' &&
+      needs['build-tauri'].result == 'success' &&
+      needs['upload-release-metadata'].result == 'success' &&
+      needs['update-latest-json'].result == 'success' &&
+      needs['verify-release-assets'].result == 'success' &&
       (needs['upload-to-r2'].result == 'success' || needs['upload-to-r2'].result == 'skipped')
     needs:
       [
