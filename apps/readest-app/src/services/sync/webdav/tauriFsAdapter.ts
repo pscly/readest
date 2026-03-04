@@ -9,10 +9,30 @@ const dirname = (filePath: string) => {
   return normalized.slice(0, index);
 };
 
+const extractErrorMessage = (error: unknown): string | null => {
+  if (typeof error === 'string') return error;
+  if (!error || typeof error !== 'object') return null;
+  const obj = error as Record<string, unknown>;
+  if (typeof obj['message'] === 'string') return obj['message'];
+  if (typeof obj['error'] === 'string') return obj['error'];
+  return null;
+};
+
 const isNotFoundError = (error: unknown) => {
-  if (!error || typeof error !== 'object') return false;
-  const message = (error as Record<string, unknown>)['message'];
-  return typeof message === 'string' && message.toLowerCase().includes('not found');
+  const message = extractErrorMessage(error);
+  if (!message) return false;
+
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('not found') ||
+    lower.includes('no such file') ||
+    lower.includes('cannot find') ||
+    lower.includes('enoent') ||
+    lower.includes('os error 2') ||
+    lower.includes('os error 3') ||
+    message.includes('找不到') ||
+    message.includes('不存在')
+  );
 };
 
 const listNames = (entries: DirEntry[]) => entries.map((entry) => entry.name);

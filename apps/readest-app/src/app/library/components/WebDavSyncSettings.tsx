@@ -37,6 +37,28 @@ const normalizeUsername = (value: string) => value.trim();
 const isHttpUrl = (value: string) => /^http:\/\//i.test(value.trim());
 const isHttpsUrl = (value: string) => /^https:\/\//i.test(value.trim());
 
+const redactSensitive = (text: string) => {
+  return text
+    .replace(/Basic\s+[A-Za-z0-9+/=]+/gi, 'Basic ***')
+    .replace(/:\/\/[^\s/@:]+:[^\s/@]+@/g, '://***:***@');
+};
+
+const tryExtractErrorMessage = (error: unknown): string | null => {
+  if (typeof error === 'string') return error;
+  if (!error || typeof error !== 'object') return null;
+  const obj = error as Record<string, unknown>;
+  if (typeof obj['message'] === 'string') return obj['message'];
+  if (typeof obj['error'] === 'string') return obj['error'];
+  return null;
+};
+
+const normalizeErrorMessage = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const redacted = redactSensitive(trimmed);
+  return redacted.length > 500 ? `${redacted.slice(0, 500)}…` : redacted;
+};
+
 const classifyWebDavError = (error: unknown): { message: string; type: 'error' | 'info' } => {
   if (error instanceof WebDavHttpError) {
     if (error.status === 401) {
@@ -61,6 +83,14 @@ const classifyWebDavError = (error: unknown): { message: string; type: 'error' |
 
   if (error instanceof Error) {
     return { message: error.message, type: 'error' };
+  }
+
+  const extractedMessage = tryExtractErrorMessage(error);
+  if (extractedMessage) {
+    const normalized = normalizeErrorMessage(extractedMessage);
+    if (normalized) {
+      return { message: normalized, type: 'error' };
+    }
   }
   return { message: '未知错误', type: 'error' };
 };

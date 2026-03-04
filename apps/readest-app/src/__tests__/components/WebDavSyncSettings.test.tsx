@@ -25,6 +25,10 @@ const { mkcolMock, propfindMock } = vi.hoisted(() => ({
   propfindMock: vi.fn(),
 }));
 
+const { runWebDavSyncOnceMock } = vi.hoisted(() => ({
+  runWebDavSyncOnceMock: vi.fn(),
+}));
+
 vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => (key: string) => key,
 }));
@@ -77,6 +81,13 @@ vi.mock('@/services/sync/webdav/client', () => {
   };
 });
 
+vi.mock('@/services/sync/webdav/runOnce', () => ({
+  runWebDavSyncOnce: runWebDavSyncOnceMock,
+  WebDavSyncNotConfiguredError: class WebDavSyncNotConfiguredError extends Error {
+    override name = 'WebDavSyncNotConfiguredError';
+  },
+}));
+
 describe('WebDavSyncSettingsWindow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -88,6 +99,7 @@ describe('WebDavSyncSettingsWindow', () => {
     clearWebDavPasswordMock.mockResolvedValue(undefined);
     mkcolMock.mockResolvedValue(undefined);
     propfindMock.mockResolvedValue([]);
+    runWebDavSyncOnceMock.mockResolvedValue({ operations: [], warnings: [] });
   });
 
   afterEach(() => {
@@ -144,6 +156,39 @@ describe('WebDavSyncSettingsWindow', () => {
         'toast',
         expect.objectContaining({
           message: expect.stringContaining('认证失败'),
+        }),
+      );
+    });
+  });
+
+  it('同步遇到非 Error 异常时也应派发可读 toast（不应回落为未知错误）', async () => {
+    runWebDavSyncOnceMock.mockRejectedValueOnce({ message: 'Injected non-Error failure' });
+    const dispatchSpy = vi.spyOn(eventDispatcher, 'dispatch').mockResolvedValue(undefined);
+
+    render(<WebDavSyncSettingsWindow />);
+    await Promise.resolve();
+    setWebDavSyncSettingsWindowVisible(true);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Server URL'), {
+      target: { value: 'https://example.com/webdav' },
+    });
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'demo-user' } });
+    const passwordInput = document.getElementById('webdav_password') as HTMLInputElement | null;
+    expect(passwordInput).toBeTruthy();
+    fireEvent.change(passwordInput!, { target: { value: '******' } });
+
+    const syncButton = screen.getByRole('button', { name: 'Sync Now' });
+    expect((syncButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(syncButton);
+
+    await waitFor(() => {
+      expect(dispatchSpy).toHaveBeenCalledWith(
+        'toast',
+        expect.objectContaining({
+          message: expect.stringContaining('Injected non-Error failure'),
         }),
       );
     });
