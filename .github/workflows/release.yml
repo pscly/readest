@@ -711,6 +711,11 @@ jobs:
           projectPath: apps/readest-app
           releaseId: ${{ needs['get-release'].outputs.release_id }}
           releaseBody: ${{ needs['get-release'].outputs.release_note }}
+          # NOTE: 多平台并发构建时，tauri-action 会尝试在每个 job 中更新/覆盖 release 里的 latest.json，
+          # 容易因为竞态触发 404（见 v0.9.116：Not Found - update-a-release-asset）。
+          # 我们改为统一在 update-latest-json job 中生成一次 latest.json，避免并发写同一资产。
+          uploadUpdaterJson: false
+          retryAttempts: 3
           args: ${{ matrix.config.args || '' }}
 
       - name: build macOS bundles (signed)
@@ -734,6 +739,8 @@ jobs:
           projectPath: apps/readest-app
           releaseId: ${{ needs['get-release'].outputs.release_id }}
           releaseBody: ${{ needs['get-release'].outputs.release_note }}
+          uploadUpdaterJson: false
+          retryAttempts: 3
           args: ${{ matrix.config.args || '' }}
 
       - name: build macOS bundles (unsigned fallback)
@@ -749,6 +756,8 @@ jobs:
           projectPath: apps/readest-app
           releaseId: ${{ needs['get-release'].outputs.release_id }}
           releaseBody: ${{ needs['get-release'].outputs.release_note }}
+          uploadUpdaterJson: false
+          retryAttempts: 3
           args: ${{ matrix.config.args || '' }}
 
       - name: build and upload portable binaries (Windows only)
@@ -862,45 +871,10 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
-      - name: prepare latest.json baseline
+      - name: generate latest.json once for all updater platforms
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-
-          api_download_asset() {
-            local release_id="$1"
-            local asset_name="$2"
-            local out_path="$3"
-            local release_json
-            local asset_id
-
-            release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}")
-            asset_id=$(jq -r --arg name "$asset_name" 'first(.assets[]? | select(.name == $name) | .id) // empty' <<<"$release_json")
-            if [ -z "$asset_id" ]; then
-              return 1
-            fi
-
-            gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$out_path"
-          }
-
-          current_release_id="${{ needs['get-release'].outputs.release_id }}"
-
-          if api_download_asset "$current_release_id" "latest.json" "latest.json"; then
-            echo "Use existing latest.json from current release"
-          else
-            echo "No latest.json on current release, fallback to latest published release"
-            if latest_release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.id' 2>/dev/null); then
-              api_download_asset "$latest_release_id" "latest.json" "latest.json"
-            else
-              echo "::error::Cannot find latest published release to bootstrap latest.json"
-              exit 1
-            fi
-          fi
-
-      - name: download updater signatures from current release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTE: ${{ needs['get-release'].outputs.release_note }}
         run: |
           set -euo pipefail
 
@@ -920,20 +894,6 @@ jobs:
 
             gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" > "$out_path"
           }
-
-          release_id="${{ needs['get-release'].outputs.release_id }}"
-          version="${{ needs['get-release'].outputs.release_version }}"
-
-          api_download_asset "$release_id" "Readest_${version}_universal.apk.sig" "Readest_${version}_universal.apk.sig"
-          api_download_asset "$release_id" "Readest_${version}_arm64.apk.sig" "Readest_${version}_arm64.apk.sig"
-          api_download_asset "$release_id" "Readest_${version}_x64-portable.exe.sig" "Readest_${version}_x64-portable.exe.sig"
-          api_download_asset "$release_id" "Readest_${version}_arm64-portable.exe.sig" "Readest_${version}_arm64-portable.exe.sig"
-
-      - name: update latest.json once for all updater platforms
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
 
           api_upload_asset() {
             local release_id="$1"
@@ -995,19 +955,73 @@ jobs:
           release_id="${{ needs['get-release'].outputs.release_id }}"
           tag="${{ needs['get-release'].outputs.release_tag }}"
           version="${{ needs['get-release'].outputs.release_version }}"
+          notes="$RELEASE_NOTE"
           repo="${{ github.repository }}"
 
-          android_universal_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_universal.apk"
-          android_arm64_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_arm64.apk"
-          windows_x64_portable_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_x64-portable.exe"
-          windows_arm64_portable_url="https://github.com/${repo}/releases/download/${tag}/Readest_${version}_arm64-portable.exe"
+          pub_date="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
 
-          android_universal_sig=$(cat "Readest_${version}_universal.apk.sig")
-          android_arm64_sig=$(cat "Readest_${version}_arm64.apk.sig")
-          windows_x64_portable_sig=$(cat "Readest_${version}_x64-portable.exe.sig")
-          windows_arm64_portable_sig=$(cat "Readest_${version}_arm64-portable.exe.sig")
+          mac_universal_asset="Readest_universal.app.tar.gz"
+          windows_x64_setup_asset="Readest_${version}_x64-setup.exe"
+          windows_arm64_setup_asset="Readest_${version}_arm64-setup.exe"
+          linux_x64_appimage_asset="Readest_${version}_amd64.AppImage"
+          linux_aarch64_appimage_asset="Readest_${version}_aarch64.AppImage"
 
-          jq \
+          android_universal_asset="Readest_${version}_universal.apk"
+          android_arm64_asset="Readest_${version}_arm64.apk"
+
+          windows_x64_portable_asset="Readest_${version}_x64-portable.exe"
+          windows_arm64_portable_asset="Readest_${version}_arm64-portable.exe"
+
+          # 下载所有关键签名（.sig 内容本身就是 base64 字符串，可直接写入 latest.json）
+          api_download_asset "$release_id" "${mac_universal_asset}.sig" "${mac_universal_asset}.sig"
+          api_download_asset "$release_id" "${windows_x64_setup_asset}.sig" "${windows_x64_setup_asset}.sig"
+          api_download_asset "$release_id" "${windows_arm64_setup_asset}.sig" "${windows_arm64_setup_asset}.sig"
+          api_download_asset "$release_id" "${linux_x64_appimage_asset}.sig" "${linux_x64_appimage_asset}.sig"
+          api_download_asset "$release_id" "${linux_aarch64_appimage_asset}.sig" "${linux_aarch64_appimage_asset}.sig"
+          api_download_asset "$release_id" "${android_universal_asset}.sig" "${android_universal_asset}.sig"
+          api_download_asset "$release_id" "${android_arm64_asset}.sig" "${android_arm64_asset}.sig"
+          api_download_asset "$release_id" "${windows_x64_portable_asset}.sig" "${windows_x64_portable_asset}.sig"
+          api_download_asset "$release_id" "${windows_arm64_portable_asset}.sig" "${windows_arm64_portable_asset}.sig"
+
+          make_url() {
+            local asset_name="$1"
+            echo "https://github.com/${repo}/releases/download/${tag}/${asset_name}"
+          }
+
+          mac_universal_url="$(make_url "$mac_universal_asset")"
+          windows_x64_setup_url="$(make_url "$windows_x64_setup_asset")"
+          windows_arm64_setup_url="$(make_url "$windows_arm64_setup_asset")"
+          linux_x64_appimage_url="$(make_url "$linux_x64_appimage_asset")"
+          linux_aarch64_appimage_url="$(make_url "$linux_aarch64_appimage_asset")"
+          android_universal_url="$(make_url "$android_universal_asset")"
+          android_arm64_url="$(make_url "$android_arm64_asset")"
+          windows_x64_portable_url="$(make_url "$windows_x64_portable_asset")"
+          windows_arm64_portable_url="$(make_url "$windows_arm64_portable_asset")"
+
+          mac_universal_sig="$(cat "${mac_universal_asset}.sig")"
+          windows_x64_setup_sig="$(cat "${windows_x64_setup_asset}.sig")"
+          windows_arm64_setup_sig="$(cat "${windows_arm64_setup_asset}.sig")"
+          linux_x64_appimage_sig="$(cat "${linux_x64_appimage_asset}.sig")"
+          linux_aarch64_appimage_sig="$(cat "${linux_aarch64_appimage_asset}.sig")"
+          android_universal_sig="$(cat "${android_universal_asset}.sig")"
+          android_arm64_sig="$(cat "${android_arm64_asset}.sig")"
+          windows_x64_portable_sig="$(cat "${windows_x64_portable_asset}.sig")"
+          windows_arm64_portable_sig="$(cat "${windows_arm64_portable_asset}.sig")"
+
+          jq -n \
+            --arg version "$version" \
+            --arg notes "$notes" \
+            --arg pub_date "$pub_date" \
+            --arg mac_universal_url "$mac_universal_url" \
+            --arg mac_universal_sig "$mac_universal_sig" \
+            --arg windows_x64_setup_url "$windows_x64_setup_url" \
+            --arg windows_x64_setup_sig "$windows_x64_setup_sig" \
+            --arg windows_arm64_setup_url "$windows_arm64_setup_url" \
+            --arg windows_arm64_setup_sig "$windows_arm64_setup_sig" \
+            --arg linux_x64_appimage_url "$linux_x64_appimage_url" \
+            --arg linux_x64_appimage_sig "$linux_x64_appimage_sig" \
+            --arg linux_aarch64_appimage_url "$linux_aarch64_appimage_url" \
+            --arg linux_aarch64_appimage_sig "$linux_aarch64_appimage_sig" \
             --arg android_universal_url "$android_universal_url" \
             --arg android_universal_sig "$android_universal_sig" \
             --arg android_arm64_url "$android_arm64_url" \
@@ -1016,13 +1030,40 @@ jobs:
             --arg windows_x64_portable_sig "$windows_x64_portable_sig" \
             --arg windows_arm64_portable_url "$windows_arm64_portable_url" \
             --arg windows_arm64_portable_sig "$windows_arm64_portable_sig" \
-            '.platforms["android-universal"] = {signature: $android_universal_sig, url: $android_universal_url}
-             | .platforms["android-arm64"] = {signature: $android_arm64_sig, url: $android_arm64_url}
-             | .platforms["windows-x86_64-portable"] = {signature: $windows_x64_portable_sig, url: $windows_x64_portable_url}
-             | .platforms["windows-aarch64-portable"] = {signature: $windows_arm64_portable_sig, url: $windows_arm64_portable_url}' \
-            latest.json > tmp.$$.json && mv tmp.$$.json latest.json
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                # macOS（universal，同一包同时兼容 x86_64/aarch64）
+                "darwin-x86_64": { signature: $mac_universal_sig, url: $mac_universal_url },
+                "darwin-x86_64-app": { signature: $mac_universal_sig, url: $mac_universal_url },
+                "darwin-aarch64": { signature: $mac_universal_sig, url: $mac_universal_url },
+                "darwin-aarch64-app": { signature: $mac_universal_sig, url: $mac_universal_url },
 
-          echo "Uploading updated latest.json to GitHub release"
+                # Windows 安装包（NSIS）
+                "windows-x86_64": { signature: $windows_x64_setup_sig, url: $windows_x64_setup_url },
+                "windows-x86_64-nsis": { signature: $windows_x64_setup_sig, url: $windows_x64_setup_url },
+                "windows-aarch64": { signature: $windows_arm64_setup_sig, url: $windows_arm64_setup_url },
+                "windows-aarch64-nsis": { signature: $windows_arm64_setup_sig, url: $windows_arm64_setup_url },
+
+                # Linux AppImage
+                "linux-x86_64": { signature: $linux_x64_appimage_sig, url: $linux_x64_appimage_url },
+                "linux-x86_64-appimage": { signature: $linux_x64_appimage_sig, url: $linux_x64_appimage_url },
+                "linux-aarch64": { signature: $linux_aarch64_appimage_sig, url: $linux_aarch64_appimage_url },
+                "linux-aarch64-appimage": { signature: $linux_aarch64_appimage_sig, url: $linux_aarch64_appimage_url },
+
+                # Android APK（旁路分发，用于下载/侧载）
+                "android-universal": { signature: $android_universal_sig, url: $android_universal_url },
+                "android-arm64": { signature: $android_arm64_sig, url: $android_arm64_url },
+
+                # Windows Portable（旁路分发）
+                "windows-x86_64-portable": { signature: $windows_x64_portable_sig, url: $windows_x64_portable_url },
+                "windows-aarch64-portable": { signature: $windows_arm64_portable_sig, url: $windows_arm64_portable_url }
+              }
+            }' > latest.json
+
+          echo "Uploading latest.json to GitHub release"
           api_upload_asset "$release_id" "latest.json" "latest.json"
 
   validate-latest-json-platform-assets:
