@@ -660,6 +660,44 @@ jobs:
         if: matrix.config.release == 'linux'
         run: cargo install tauri-cli --git https://github.com/tauri-apps/tauri --branch feat/truly-portable-appimage --force
 
+      - name: Preload AppImage tools (Linux)
+        if: matrix.config.release == 'linux' && matrix.config.arch != 'armhf'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 避免 tauri-bundler 在打包 AppImage 时因 GitHub 短暂 503/限流导致失败：
+          # 预先把 AppRun 与 linuxdeploy 下载到 tauri 的工具缓存目录。
+          tools_dir="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          mkdir -p "$tools_dir"
+
+          arch="${{ matrix.config.arch }}"
+
+          download() {
+            local url="$1"
+            local dest="$2"
+
+            if [ -s "$dest" ]; then
+              echo "✓ 已存在: $dest"
+              return 0
+            fi
+
+            echo "↓ 下载: $url"
+            curl -fL \
+              --retry 8 \
+              --retry-all-errors \
+              --retry-delay 3 \
+              --connect-timeout 10 \
+              --max-time 600 \
+              "$url" -o "${dest}.tmp"
+
+            mv "${dest}.tmp" "$dest"
+            chmod +x "$dest"
+          }
+
+          download "https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-${arch}" "$tools_dir/AppRun-${arch}"
+          download "https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-${arch}.AppImage" "$tools_dir/linuxdeploy-${arch}.AppImage"
+
       - name: build desktop bundles (non-macos)
         if: matrix.config.release != 'android' && matrix.config.release != 'macos'
         uses: tauri-apps/tauri-action@v0
