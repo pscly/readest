@@ -4,8 +4,26 @@ import { initReactI18next } from 'react-i18next';
 import { options } from '../../i18next-scanner.config';
 
 const isBrowser = typeof window !== 'undefined';
+const DEFAULT_LANGUAGE = 'zh-CN';
+
+const ensureDefaultLanguage = () => {
+  if (!isBrowser) {
+    return;
+  }
+  try {
+    const key = 'i18nextLng';
+    const existing = window.localStorage.getItem(key);
+    if (!existing) {
+      window.localStorage.setItem(key, DEFAULT_LANGUAGE);
+    }
+  } catch {
+    // ignore
+  }
+};
 
 const initI18n = async () => {
+  ensureDefaultLanguage();
+
   if (isBrowser) {
     const HttpApi = (await import('i18next-http-backend')).default;
     i18n.use(HttpApi);
@@ -24,7 +42,7 @@ const initI18n = async () => {
         uz: ['ru', 'en'],
         ug: ['ru', 'en'],
         tt: ['ru', 'en'],
-        default: ['en'],
+        default: [DEFAULT_LANGUAGE, 'en'],
       },
       ns: options.ns,
       defaultNS: options.defaultNs,

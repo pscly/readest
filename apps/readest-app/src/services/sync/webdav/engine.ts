@@ -30,6 +30,7 @@ export interface WebDavSyncMetadataOnceParams {
   scope: WebDavSyncScope;
   deviceId: string;
   nowMs?: number;
+  maxConcurrentTransfers?: number;
 }
 
 export interface WebDavSyncMetadataOnceResult {
@@ -45,6 +46,11 @@ const WEBDAV_TRASH_RETENTION_MS = WEBDAV_TRASH_RETENTION_DAYS * DAY_MS;
 const MERGE_JSON_MAX_RETRIES = 2;
 
 const ensureTrailingSlashTrimmed = (value: string) => value.replace(/[\\/]+$/g, '');
+
+const WEBDAV_DEFAULT_MAX_CONCURRENT_TRANSFERS = 4;
+const WEBDAV_MAX_CONCURRENT_TRANSFERS_LIMIT = 8;
+const WEBDAV_LOCAL_MANIFEST_CACHE_SCHEMA_VERSION = 1;
+const WEBDAV_LOCAL_MANIFEST_CACHE_FILENAME = 'webdav.local.manifest.json';
 
 const joinPath = (...parts: string[]) => {
   const filtered = parts.filter((p) => p.length > 0);
@@ -104,6 +110,13 @@ const sha256Hex = async (data: Uint8Array): Promise<string> => {
   }
   const { createHash } = await import('node:crypto');
   return createHash('sha256').update(Buffer.from(data)).digest('hex');
+};
+
+const clampInteger = (value: unknown, fallback: number, min: number, max: number) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.floor(value)));
 };
 
 const isNodeRuntime = () => {
@@ -288,14 +301,195 @@ const writeLocalJsonWithBak = async (params: {
   await params.fs.writeFileAtomic(main, data);
 };
 
+interface WebDavLocalManifestCacheEntry {
+  fileSizeBytes: number;
+  fileModifiedAtMs: number;
+  manifestSizeBytes: number;
+  checksum?: string;
+}
+
+interface WebDavLocalManifestCacheFile {
+  schemaVersion: typeof WEBDAV_LOCAL_MANIFEST_CACHE_SCHEMA_VERSION;
+  updatedAtMs: number;
+  entries: Record<string, WebDavLocalManifestCacheEntry>;
+}
+
+const readLocalManifestCache = async (
+  fs: WebDavFsAdapter,
+  absolutePath: string,
+): Promise<Map<string, WebDavLocalManifestCacheEntry> | null> => {
+  const bytes = await fs.readFile(absolutePath).catch(() => null);
+  if (!bytes) {
+    return null;
+  }
+  const parsed = parseJson<unknown>(decodeUtf8(bytes));
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  if (obj['schemaVersion'] !== WEBDAV_LOCAL_MANIFEST_CACHE_SCHEMA_VERSION) {
+    return null;
+  }
+
+  const rawEntries = obj['entries'];
+  if (!rawEntries || typeof rawEntries !== 'object' || Array.isArray(rawEntries)) {
+    return null;
+  }
+
+  const map = new Map<string, WebDavLocalManifestCacheEntry>();
+  for (const [relativePath, value] of Object.entries(rawEntries as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      continue;
+    }
+    const record = value as Record<string, unknown>;
+    const fileSizeBytes = record['fileSizeBytes'];
+    const fileModifiedAtMs = record['fileModifiedAtMs'];
+    const manifestSizeBytes = record['manifestSizeBytes'];
+    const checksum = record['checksum'];
+    if (
+      typeof fileSizeBytes !== 'number' ||
+      !Number.isFinite(fileSizeBytes) ||
+      typeof fileModifiedAtMs !== 'number' ||
+      !Number.isFinite(fileModifiedAtMs) ||
+      typeof manifestSizeBytes !== 'number' ||
+      !Number.isFinite(manifestSizeBytes)
+    ) {
+      continue;
+    }
+    if (checksum !== undefined && typeof checksum !== 'string') {
+      continue;
+    }
+    map.set(relativePath, {
+      fileSizeBytes,
+      fileModifiedAtMs,
+      manifestSizeBytes,
+      checksum,
+    });
+  }
+  return map;
+};
+
+const writeLocalManifestCache = async (params: {
+  fs: WebDavFsAdapter;
+  absolutePath: string;
+  updatedAtMs: number;
+  entries: Map<string, WebDavLocalManifestCacheEntry>;
+}): Promise<void> => {
+  const record: Record<string, WebDavLocalManifestCacheEntry> = {};
+  const sortedKeys = Array.from(params.entries.keys()).sort((a, b) => a.localeCompare(b));
+  for (const key of sortedKeys) {
+    const value = params.entries.get(key);
+    if (!value) continue;
+    record[key] = value;
+  }
+
+  const cacheFile: WebDavLocalManifestCacheFile = {
+    schemaVersion: WEBDAV_LOCAL_MANIFEST_CACHE_SCHEMA_VERSION,
+    updatedAtMs: params.updatedAtMs,
+    entries: record,
+  };
+  const text = JSON.stringify(cacheFile, null, 2);
+  await params.fs.writeFileAtomic(params.absolutePath, encodeUtf8(text)).catch(() => undefined);
+};
+
+const localManifestCachePath = (scope: WebDavSyncScope): string | null => {
+  try {
+    const settingsDir = getSettingsDir(scope);
+    return `${ensureTrailingSlashTrimmed(settingsDir)}/${WEBDAV_LOCAL_MANIFEST_CACHE_FILENAME}`;
+  } catch {
+    return null;
+  }
+};
+
+type AsyncTask<T> = () => Promise<T>;
+
+const runConcurrently = async <T>(tasks: AsyncTask<T>[], maxConcurrency: number): Promise<T[]> => {
+  const concurrency = clampInteger(maxConcurrency, 1, 1, WEBDAV_MAX_CONCURRENT_TRANSFERS_LIMIT);
+  if (tasks.length === 0) {
+    return [];
+  }
+  if (concurrency <= 1 || tasks.length === 1) {
+    const results: T[] = [];
+    for (const task of tasks) {
+      results.push(await task());
+    }
+    return results;
+  }
+
+  const results: T[] = new Array(tasks.length);
+  let nextIndex = 0;
+  let aborted: unknown = null;
+
+  const worker = async () => {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (aborted) return;
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= tasks.length) {
+        return;
+      }
+      try {
+        results[index] = await tasks[index]!();
+      } catch (error) {
+        aborted = error;
+        return;
+      }
+    }
+  };
+
+  const workerCount = Math.min(concurrency, tasks.length);
+  const workers = Array.from({ length: workerCount }, () => worker());
+  await Promise.all(workers);
+  if (aborted) {
+    throw aborted;
+  }
+  return results;
+};
+
+const remoteDirEnsureStateByClient = new WeakMap<
+  WebDavClient,
+  {
+    created: Set<string>;
+    inFlight: Map<string, Promise<void>>;
+  }
+>();
+
 const ensureRemoteDirs = async (client: WebDavClient, relativeDirPath: string): Promise<void> => {
   const normalized = relativeDirPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
   if (!normalized) return;
+  const state =
+    remoteDirEnsureStateByClient.get(client) ??
+    (() => {
+      const created = new Set<string>();
+      const inFlight = new Map<string, Promise<void>>();
+      const next = { created, inFlight };
+      remoteDirEnsureStateByClient.set(client, next);
+      return next;
+    })();
   const parts = normalized.split('/').filter(Boolean);
   let current = '';
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
-    await client.mkcol(current);
+    if (state.created.has(current)) {
+      continue;
+    }
+    const pending = state.inFlight.get(current);
+    if (pending) {
+      await pending;
+      continue;
+    }
+    const task = client
+      .mkcol(current)
+      .then(() => {
+        state.created.add(current);
+      })
+      .finally(() => {
+        state.inFlight.delete(current);
+      });
+    state.inFlight.set(current, task);
+    await task;
   }
 };
 
@@ -321,6 +515,11 @@ const scanLocalScopeManifest = async (params: {
 }): Promise<WebDavManifestSchema> => {
   const entries: WebDavManifestEntry[] = [];
   const excludeMatchers = buildExcludeMatchers(params.scope.excludes);
+  const cacheAbsolutePath = localManifestCachePath(params.scope);
+  const previousCache = cacheAbsolutePath
+    ? await readLocalManifestCache(params.fs, cacheAbsolutePath)
+    : null;
+  const nextCache = new Map<string, WebDavLocalManifestCacheEntry>();
 
   const includeFile = async (relativePath: string, absolutePath: string) => {
     if (isExcludedRelativePath(relativePath, excludeMatchers)) {
@@ -328,6 +527,22 @@ const scanLocalScopeManifest = async (params: {
     }
     const info = await params.fs.stat(absolutePath);
     if (!info || !info.isFile) {
+      return;
+    }
+
+    const cached = previousCache?.get(relativePath);
+    if (
+      cached &&
+      cached.fileSizeBytes === info.sizeBytes &&
+      cached.fileModifiedAtMs === info.modifiedAtMs
+    ) {
+      entries.push({
+        path: relativePath,
+        sizeBytes: cached.manifestSizeBytes,
+        modifiedAtMs: info.modifiedAtMs,
+        checksum: cached.checksum,
+      });
+      nextCache.set(relativePath, cached);
       return;
     }
 
@@ -341,22 +556,36 @@ const scanLocalScopeManifest = async (params: {
         remoteSettingsJson: '{}',
       }).remoteUploadJson;
       const bytes = encodeUtf8(sanitized);
+      const checksum = await sha256Hex(bytes);
       entries.push({
         path: relativePath,
         sizeBytes: bytes.byteLength,
         modifiedAtMs: info.modifiedAtMs,
-        checksum: await sha256Hex(bytes),
+        checksum,
+      });
+      nextCache.set(relativePath, {
+        fileSizeBytes: info.sizeBytes,
+        fileModifiedAtMs: info.modifiedAtMs,
+        manifestSizeBytes: bytes.byteLength,
+        checksum,
       });
       return;
     }
 
     if (isJsonLikePath(relativePath)) {
       const bytes = await params.fs.readFile(absolutePath);
+      const checksum = await sha256Hex(bytes);
       entries.push({
         path: relativePath,
         sizeBytes: info.sizeBytes,
         modifiedAtMs: info.modifiedAtMs,
-        checksum: await sha256Hex(bytes),
+        checksum,
+      });
+      nextCache.set(relativePath, {
+        fileSizeBytes: info.sizeBytes,
+        fileModifiedAtMs: info.modifiedAtMs,
+        manifestSizeBytes: info.sizeBytes,
+        checksum,
       });
       return;
     }
@@ -366,6 +595,12 @@ const scanLocalScopeManifest = async (params: {
       path: relativePath,
       sizeBytes: info.sizeBytes,
       modifiedAtMs: info.modifiedAtMs,
+      checksum,
+    });
+    nextCache.set(relativePath, {
+      fileSizeBytes: info.sizeBytes,
+      fileModifiedAtMs: info.modifiedAtMs,
+      manifestSizeBytes: info.sizeBytes,
       checksum,
     });
   };
@@ -402,6 +637,15 @@ const scanLocalScopeManifest = async (params: {
     if (mapping.kind === 'directory' && mapping.recursive) {
       await walkDir(mapping.relativePath, mapping.absolutePath);
     }
+  }
+
+  if (cacheAbsolutePath) {
+    await writeLocalManifestCache({
+      fs: params.fs,
+      absolutePath: cacheAbsolutePath,
+      updatedAtMs: params.nowMs,
+      entries: nextCache,
+    });
   }
 
   return {
@@ -765,6 +1009,17 @@ const updateManifestEntry = (manifest: WebDavManifestSchema, entry: WebDavManife
   manifest.entries = Array.from(byPath.values()).sort((a, b) => a.path.localeCompare(b.path));
 };
 
+const updateManifestEntries = (manifest: WebDavManifestSchema, entries: WebDavManifestEntry[]) => {
+  if (entries.length === 0) {
+    return;
+  }
+  const byPath = new Map(manifest.entries.map((e) => [e.path, e]));
+  for (const entry of entries) {
+    byPath.set(entry.path, entry);
+  }
+  manifest.entries = Array.from(byPath.values()).sort((a, b) => a.path.localeCompare(b.path));
+};
+
 export interface RestoreBookFromTrashParams {
   fs: WebDavFsAdapter;
   scope: WebDavSyncScope;
@@ -825,6 +1080,12 @@ export async function syncWebDavMetadataOnce(
     const nowMs = params.nowMs ?? Date.now();
     const tombstoneCutoffMs = nowMs - WEBDAV_TRASH_RETENTION_MS;
     const warnings: string[] = [];
+    const maxConcurrentTransfers = clampInteger(
+      params.maxConcurrentTransfers,
+      WEBDAV_DEFAULT_MAX_CONCURRENT_TRANSFERS,
+      1,
+      WEBDAV_MAX_CONCURRENT_TRANSFERS_LIMIT,
+    );
 
     await params.client.mkcol('');
     await ensureRemoteDirs(params.client, '.meta');
@@ -868,7 +1129,134 @@ export async function syncWebDavMetadataOnce(
     const movedLocalBookDirs = new Set<string>();
     const movedRemoteBookDirs = new Set<string>();
 
+    const transferTasks: AsyncTask<WebDavManifestEntry[]>[] = [];
+
     for (const operation of operations) {
+      if (operation.type === 'upload') {
+        transferTasks.push(async () => {
+          const updates: WebDavManifestEntry[] = [];
+          const localAbs = resolveLocalPath(params.scope, operation.path);
+          if (!localAbs) return updates;
+
+          if (isJsonLikePath(operation.path)) {
+            const localText = await readLocalText(params.fs, localAbs);
+            if (localText === null) return updates;
+
+            let uploadText = localText;
+            if (isSettingsPath(operation.path)) {
+              uploadText = mergeSettingsJson({
+                localSettingsJson: localText,
+                remoteSettingsJson: '{}',
+              }).remoteUploadJson;
+            }
+
+            await ensureRemoteDirs(params.client, parentRemoteDir(operation.path));
+            await params.client.putText(operation.path, uploadText, 'application/json');
+            updates.push({ ...operation.local, path: operation.path, modifiedAtMs: nowMs });
+            return updates;
+          }
+
+          if (operation.remote) {
+            const conflictRelBase = makeConflictCopyRelativePath({
+              originalPath: operation.path,
+              side: 'remote',
+              deviceId: params.deviceId,
+              nowMs,
+            });
+            let moved = false;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              const conflictRel =
+                attempt === 0 ? conflictRelBase : `${conflictRelBase}.${attempt}.${randomSuffix()}`;
+              try {
+                await ensureRemoteDirs(params.client, parentRemoteDir(conflictRel));
+                await params.client.move(operation.path, conflictRel, { overwrite: false });
+                updates.push({ ...operation.remote, path: conflictRel });
+                moved = true;
+                break;
+              } catch {
+                continue;
+              }
+            }
+            if (!moved) {
+              warnings.push(`无法为二进制冲突创建远端冲突副本: ${operation.path}`);
+            }
+          }
+
+          await ensureRemoteDirs(params.client, parentRemoteDir(operation.path));
+          await params.client.uploadFileFromPath(
+            operation.path,
+            localAbs,
+            guessContentType(operation.path),
+          );
+          updates.push({ ...operation.local, path: operation.path });
+          return updates;
+        });
+        continue;
+      }
+
+      if (operation.type === 'download') {
+        transferTasks.push(async () => {
+          const updates: WebDavManifestEntry[] = [];
+          const localAbs = resolveLocalPath(params.scope, operation.path);
+          if (!localAbs) {
+            return updates;
+          }
+
+          if (isJsonLikePath(operation.path)) {
+            const remoteText = await readRemoteJsonOrNull(params.client, operation.path);
+            if (remoteText === null) {
+              return updates;
+            }
+
+            const needsBackup =
+              operation.path === 'Settings/settings.json' || operation.path === 'Books/library.json';
+            if (needsBackup) {
+              await writeLocalJsonWithBak({
+                fs: params.fs,
+                mainAbsolutePath: localAbs,
+                jsonText: remoteText,
+              });
+            } else {
+              await params.fs.writeFileAtomic(localAbs, encodeUtf8(remoteText));
+            }
+            return updates;
+          }
+
+          if (operation.local) {
+            const conflictRel = makeConflictCopyRelativePath({
+              originalPath: operation.path,
+              side: 'local',
+              deviceId: params.deviceId,
+              nowMs,
+            });
+            const conflictAbs = resolveLocalPath(params.scope, conflictRel);
+            if (conflictAbs) {
+              await params.fs.mkdirp(dirname(conflictAbs));
+              await params.fs.rename(localAbs, conflictAbs);
+
+              await ensureRemoteDirs(params.client, parentRemoteDir(conflictRel));
+              await params.client.uploadFileFromPath(
+                conflictRel,
+                conflictAbs,
+                guessContentType(conflictRel),
+              );
+              updates.push({ ...operation.local, path: conflictRel });
+            }
+          }
+
+          const tempPath = `${localAbs}.tmp.${randomSuffix()}`;
+          try {
+            await params.client.downloadFileToPath(operation.path, tempPath);
+            await params.fs.rename(tempPath, localAbs);
+          } catch (error) {
+            await params.fs.remove(tempPath);
+            throw error;
+          }
+          return updates;
+        });
+        continue;
+      }
+
       if (operation.type === 'trash_local') {
         await moveLocalPathToTrash({
           fs: params.fs,
@@ -888,148 +1276,6 @@ export async function syncWebDavMetadataOnce(
           deletedAtMs: operation.deletedAtMs,
           movedBookDirs: movedRemoteBookDirs,
         });
-        continue;
-      }
-
-      if (operation.type === 'download') {
-        const localAbs = resolveLocalPath(params.scope, operation.path);
-        if (!localAbs) {
-          continue;
-        }
-
-        if (isJsonLikePath(operation.path)) {
-          const remoteText = await readRemoteJsonOrNull(params.client, operation.path);
-          if (remoteText === null) {
-            continue;
-          }
-
-          const needsBackup =
-            operation.path === 'Settings/settings.json' || operation.path === 'Books/library.json';
-          if (needsBackup) {
-            await writeLocalJsonWithBak({
-              fs: params.fs,
-              mainAbsolutePath: localAbs,
-              jsonText: remoteText,
-            });
-          } else {
-            await params.fs.writeFileAtomic(localAbs, encodeUtf8(remoteText));
-          }
-          continue;
-        }
-
-        if (operation.local) {
-          const conflictRel = makeConflictCopyRelativePath({
-            originalPath: operation.path,
-            side: 'local',
-            deviceId: params.deviceId,
-            nowMs,
-          });
-          const conflictAbs = resolveLocalPath(params.scope, conflictRel);
-          if (conflictAbs) {
-            await params.fs.mkdirp(dirname(conflictAbs));
-            await params.fs.rename(localAbs, conflictAbs);
-
-            await ensureRemoteDirs(params.client, parentRemoteDir(conflictRel));
-            await params.client.uploadFileFromPath(
-              conflictRel,
-              conflictAbs,
-              guessContentType(conflictRel),
-            );
-            const conflictInfo = await params.fs.stat(conflictAbs);
-            if (conflictInfo) {
-              updateManifestEntry(remoteManifest, {
-                path: conflictRel,
-                sizeBytes: conflictInfo.sizeBytes,
-                modifiedAtMs: conflictInfo.modifiedAtMs,
-                checksum: await computePartialMd5FromPath(conflictAbs, conflictInfo.sizeBytes),
-              });
-            }
-          }
-        }
-
-        await ensureRemoteDirs(params.client, parentRemoteDir(operation.path));
-        const tempPath = `${localAbs}.tmp.${randomSuffix()}`;
-        try {
-          await params.client.downloadFileToPath(operation.path, tempPath);
-          await params.fs.rename(tempPath, localAbs);
-        } catch (error) {
-          await params.fs.remove(tempPath);
-          throw error;
-        }
-        continue;
-      }
-
-      if (operation.type === 'upload') {
-        const localAbs = resolveLocalPath(params.scope, operation.path);
-        if (!localAbs) continue;
-
-        if (isJsonLikePath(operation.path)) {
-          const localText = await readLocalText(params.fs, localAbs);
-          if (localText === null) continue;
-
-          let uploadText = localText;
-          if (isSettingsPath(operation.path)) {
-            uploadText = mergeSettingsJson({
-              localSettingsJson: localText,
-              remoteSettingsJson: '{}',
-            }).remoteUploadJson;
-          }
-
-          await ensureRemoteDirs(params.client, parentRemoteDir(operation.path));
-          await params.client.putText(operation.path, uploadText, 'application/json');
-
-          updateManifestEntry(
-            remoteManifest,
-            await toManifestEntryFromText({
-              path: operation.path,
-              text: uploadText,
-              modifiedAtMs: nowMs,
-            }),
-          );
-          continue;
-        }
-
-        if (operation.remote) {
-          const conflictRelBase = makeConflictCopyRelativePath({
-            originalPath: operation.path,
-            side: 'remote',
-            deviceId: params.deviceId,
-            nowMs,
-          });
-          let moved = false;
-          for (let attempt = 0; attempt < 3; attempt += 1) {
-            const conflictRel =
-              attempt === 0 ? conflictRelBase : `${conflictRelBase}.${attempt}.${randomSuffix()}`;
-            try {
-              await ensureRemoteDirs(params.client, parentRemoteDir(conflictRel));
-              await params.client.move(operation.path, conflictRel, { overwrite: false });
-              updateManifestEntry(remoteManifest, { ...operation.remote, path: conflictRel });
-              moved = true;
-              break;
-            } catch {
-              continue;
-            }
-          }
-          if (!moved) {
-            warnings.push(`无法为二进制冲突创建远端冲突副本: ${operation.path}`);
-          }
-        }
-
-        await ensureRemoteDirs(params.client, parentRemoteDir(operation.path));
-        await params.client.uploadFileFromPath(
-          operation.path,
-          localAbs,
-          guessContentType(operation.path),
-        );
-        const info = await params.fs.stat(localAbs);
-        if (info) {
-          updateManifestEntry(remoteManifest, {
-            path: operation.path,
-            sizeBytes: info.sizeBytes,
-            modifiedAtMs: info.modifiedAtMs,
-            checksum: await computePartialMd5FromPath(localAbs, info.sizeBytes),
-          });
-        }
         continue;
       }
 
@@ -1201,6 +1447,10 @@ export async function syncWebDavMetadataOnce(
         continue;
       }
     }
+
+    const transferResults = await runConcurrently(transferTasks, maxConcurrentTransfers);
+    const transferUpdates = transferResults.flat();
+    updateManifestEntries(remoteManifest, transferUpdates);
 
     const nextManifest: WebDavManifestSchema = {
       ...remoteManifest,

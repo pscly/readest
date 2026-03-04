@@ -182,6 +182,69 @@ describe('syncWebDavMetadataOnce', () => {
     }
   });
 
+  it('limits concurrent binary uploads when maxConcurrentTransfers is set', async () => {
+    const server = await startWebDavMockServer();
+    try {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'readest-webdav-concurrency-'));
+      const cfg = path.join(root, 'cfg');
+      const data = path.join(root, 'data');
+
+      const scope = buildWebDavSyncScope({
+        appConfigDir: cfg,
+        appDataDir: data,
+        isPortable: false,
+      });
+      const booksRoot = scope.mappings.find((m) => m.key === 'Books')!.absolutePath;
+
+      for (let i = 0; i < 6; i += 1) {
+        await writeBytes(
+          path.join(booksRoot, `book-${i}`, `file-${i}.epub`),
+          new Uint8Array([i, i + 1, i + 2]),
+        );
+      }
+
+      const client = new WebDavClient({
+        baseUrl: server.baseUrl,
+        rootDir: 'readest1',
+        username: 'user',
+        password: 'pass',
+        timeoutMs: 5_000,
+        maxRetries: 0,
+      });
+
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const originalUpload = client.uploadFileFromPath.bind(client);
+      client.uploadFileFromPath = async (...args: Parameters<typeof originalUpload>) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 50);
+          });
+          return await originalUpload(...args);
+        } finally {
+          inFlight -= 1;
+        }
+      };
+
+      const adapter = new NodeFsAdapter();
+      await syncWebDavMetadataOnce({
+        client,
+        fs: adapter,
+        scope,
+        deviceId: 'deviceA',
+        nowMs: 10_000,
+        maxConcurrentTransfers: 2,
+      });
+
+      expect(maxInFlight).toBeLessThanOrEqual(2);
+      expect(maxInFlight).toBeGreaterThanOrEqual(2);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('preserves binary conflicts as conflict copies', async () => {
     const server = await startWebDavMockServer();
     try {

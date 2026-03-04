@@ -56,5 +56,6 @@ export async function runWebDavSyncOnce(appService: AppService) {
     fs,
     scope,
     deviceId: deviceInfo.deviceId,
+    maxConcurrentTransfers: localSettings.maxConcurrentTransfers,
   });
 }

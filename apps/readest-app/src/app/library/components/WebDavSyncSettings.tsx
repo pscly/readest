@@ -294,7 +294,7 @@ export const WebDavSyncSettingsWindow: React.FC = () => {
               spellCheck='false'
               value={settings.baseUrl}
               onChange={(e) => setSettings((prev) => ({ ...prev, baseUrl: e.target.value }))}
-              placeholder='http(s)://.../webdav'
+              placeholder={_('Example: http(s)://your-server/dav/webdav')}
               disabled={!canUseWebDav}
             />
           </div>
@@ -327,6 +327,32 @@ export const WebDavSyncSettingsWindow: React.FC = () => {
                 onChange={(e) => setSettings((prev) => ({ ...prev, rootDir: e.target.value }))}
                 disabled={!canUseWebDav}
               />
+            </div>
+          </div>
+
+          <div className='form-control w-full'>
+            <label className='label py-1' htmlFor='webdav_max_concurrent_transfers'>
+              <span className='label-text font-medium'>{_('Max Concurrent Transfers')}</span>
+            </label>
+            <input
+              id='webdav_max_concurrent_transfers'
+              type='number'
+              min={1}
+              max={8}
+              className='input input-bordered h-12 w-full focus:outline-none focus:ring-0'
+              value={settings.maxConcurrentTransfers}
+              onChange={(e) => {
+                const nextValue = e.target.valueAsNumber;
+                if (!Number.isFinite(nextValue)) {
+                  return;
+                }
+                const clamped = Math.min(8, Math.max(1, Math.floor(nextValue)));
+                setSettings((prev) => ({ ...prev, maxConcurrentTransfers: clamped }));
+              }}
+              disabled={!canUseWebDav}
+            />
+            <div className='text-base-content/60 mt-1 text-xs'>
+              {_('Recommended: 4. Lower it if your WebDAV server is slow or unstable.')}
             </div>
           </div>
 

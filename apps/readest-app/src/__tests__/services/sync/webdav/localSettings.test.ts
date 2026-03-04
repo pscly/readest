@@ -10,6 +10,7 @@ describe('serializeWebDavLocalSettings', () => {
       autoSync: true,
       allowInsecureTls: true,
       httpWarningAcknowledged: true,
+      maxConcurrentTransfers: 6,
       password: 'should-not-be-serialized',
     });
 
@@ -23,6 +24,7 @@ describe('serializeWebDavLocalSettings', () => {
         autoSync: true,
         allowInsecureTls: true,
         httpWarningAcknowledged: true,
+        maxConcurrentTransfers: 6,
       }),
     );
   });
