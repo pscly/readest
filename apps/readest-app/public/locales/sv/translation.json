@@ -832,6 +832,9 @@
   "Clear search": "Rensa sökning",
   "Clear search history": "Rensa sökhistorik",
   "Tap to Toggle Footer": "Tryck för att växla sidfot",
+  "Show Current Time": "Visa aktuell tid",
+  "Use 24 Hour Clock": "Använd 24-timmarsklocka",
+  "Show Current Battery Status": "Visa aktuell batteristatus",
   "Exported successfully": "Exporterad",
   "Book exported successfully.": "Boken har exporterats.",
   "Failed to export the book.": "Det gick inte att exportera boken.",
@@ -1056,5 +1059,10 @@
   "Highlights synced to Readwise": "Markeringar synkroniserade till Readwise",
   "Readwise sync failed: no internet connection": "Readwise-synkronisering misslyckades: ingen internetanslutning",
   "Readwise sync failed: {{error}}": "Readwise-synkronisering misslyckades: {{error}}",
-  "System Screen Brightness": "Systemets skärmljusstyrka"
+  "System Screen Brightness": "Systemets skärmljusstyrka",
+  "Page:": "Sida:",
+  "Page: {{number}}": "Sida: {{number}}",
+  "Annotation page number": "Annoteringssidnummer",
+  "Translating...": "Översätter...",
+  "Show Battery Percentage": "Visa batteriprocent"
 }

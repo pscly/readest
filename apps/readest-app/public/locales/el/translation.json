@@ -832,6 +832,9 @@
   "Clear search": "Εκκαθάριση αναζήτησης",
   "Clear search history": "Εκκαθάριση ιστορικού αναζήτησης",
   "Tap to Toggle Footer": "Πατήστε για εναλλαγή υποσέλιδου",
+  "Show Current Time": "Εμφάνιση τρέχουσας ώρας",
+  "Use 24 Hour Clock": "Χρήση 24ωρης μορφής ώρας",
+  "Show Current Battery Status": "Εμφάνιση τρέχουσας κατάστασης μπαταρίας",
   "Exported successfully": "Εξαγωγή επιτυχής",
   "Book exported successfully.": "Το βιβλίο εξήχθη επιτυχώς.",
   "Failed to export the book.": "Αποτυχία εξαγωγής του βιβλίου.",
@@ -1056,5 +1059,10 @@
   "Highlights synced to Readwise": "Οι επισημάνσεις συγχρονίστηκαν στο Readwise",
   "Readwise sync failed: no internet connection": "Ο συγχρονισμός Readwise απέτυχε: δεν υπάρχει σύνδεση στο διαδίκτυο",
   "Readwise sync failed: {{error}}": "Ο συγχρονισμός Readwise απέτυχε: {{error}}",
-  "System Screen Brightness": "Φωτεινότητα οθόνης συστήματος"
+  "System Screen Brightness": "Φωτεινότητα οθόνης συστήματος",
+  "Page:": "Σελίδα:",
+  "Page: {{number}}": "Σελίδα: {{number}}",
+  "Annotation page number": "Αριθμός σελίδας σχολίου",
+  "Translating...": "Μετάφραση...",
+  "Show Battery Percentage": "Εμφάνιση ποσοστού μπαταρίας"
 }

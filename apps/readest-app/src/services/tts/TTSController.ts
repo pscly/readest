@@ -213,7 +213,16 @@ export class TTSController extends EventTarget {
   }
 
   async #handleNavigationWithSSML(ssml: string | undefined, isPlaying: boolean) {
-    if (isPlaying) this.#speak(ssml);
+    if (isPlaying) {
+      this.#speak(ssml);
+    } else {
+      if (ssml) {
+        const { marks } = parseSSMLMarks(ssml);
+        if (marks.length > 0) {
+          this.dispatchSpeakMark(marks[0]);
+        }
+      }
+    }
   }
 
   async #handleNavigationWithoutSSML(initSection: () => Promise<boolean>, isPlaying: boolean) {
@@ -531,6 +540,7 @@ export class TTSController extends EventTarget {
     await this.stop();
     this.#clearHighlighter();
     this.#ttsSectionIndex = -1;
+    this.view.tts = null;
     if (this.ttsWebClient.initialized) {
       await this.ttsWebClient.shutdown();
     }

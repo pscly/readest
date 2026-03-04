@@ -227,6 +227,10 @@ const getColorStyles = (
       border-color: unset;
       background-color: ${bg} !important;
     }
+    .calibre {
+      color: unset;
+      background-color: unset;
+    }
   `;
   return colorStyles;
 };
@@ -278,6 +282,8 @@ const getLayoutStyles = (
   body {
     overflow: unset;
     zoom: ${zoomLevel};
+    padding: unset;
+    margin: unset;
   }
   svg:where(:not([width])), img:where(:not([width])) {
     width: auto;
@@ -390,10 +396,6 @@ const getLayoutStyles = (
     display: none;
   }
 
-  .calibre {
-    color: unset;
-  }
-
   div:has(> img, > svg) {
     max-width: 100% !important;
   }
@@ -474,8 +476,6 @@ export const getFootnoteStyles = () => `
   }
 
   a:any-link {
-    cursor: default;
-    pointer-events: none;
     text-decoration: none;
     padding: unset;
     margin: unset;

@@ -842,6 +842,9 @@
   "Clear search": "Cancella ricerca",
   "Clear search history": "Cancella cronologia ricerche",
   "Tap to Toggle Footer": "Tocca per mostrare/nascondere il piè di pagina",
+  "Show Current Time": "Mostra ora attuale",
+  "Use 24 Hour Clock": "Usa formato 24 ore",
+  "Show Current Battery Status": "Mostra lo stato attuale della batteria",
   "Exported successfully": "Esportato con successo",
   "Book exported successfully.": "Libro esportato con successo.",
   "Failed to export the book.": "Impossibile esportare il libro.",
@@ -1068,5 +1071,10 @@
   "Highlights synced to Readwise": "Evidenziazioni sincronizzate su Readwise",
   "Readwise sync failed: no internet connection": "Sincronizzazione Readwise fallita: nessuna connessione internet",
   "Readwise sync failed: {{error}}": "Sincronizzazione Readwise fallita: {{error}}",
-  "System Screen Brightness": "Luminosità dello schermo del sistema"
+  "System Screen Brightness": "Luminosità dello schermo del sistema",
+  "Page:": "Pagina:",
+  "Page: {{number}}": "Pagina: {{number}}",
+  "Annotation page number": "Numero di pagina dell'annotazione",
+  "Translating...": "Traduzione...",
+  "Show Battery Percentage": "Mostra percentuale batteria"
 }
