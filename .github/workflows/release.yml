@@ -69,6 +69,25 @@ jobs:
 
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
 
+      - name: validate release tag matches package.json version
+        env:
+          RELEASE_TAG: ${{ steps['resolve-release-tag'].outputs.release_tag }}
+          RELEASE_VERSION: ${{ steps['get-release-notes'].outputs.release_version }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${RELEASE_VERSION:-}" ]; then
+            echo "::error::release_version 为空，无法校验发布版本。"
+            exit 1
+          fi
+
+          expected_tag="v${RELEASE_VERSION}"
+          if [ "$RELEASE_TAG" != "$expected_tag" ]; then
+            echo "::error::Release tag (${RELEASE_TAG}) 与 apps/readest-app/package.json version (${RELEASE_VERSION}) 不一致。"
+            echo "::error::请先把版本号更新为 ${RELEASE_VERSION} 并提交，再打 tag：${expected_tag}（或不传 tag 让 workflow 自动生成）。"
+            exit 1
+          fi
+
       - name: get or create release by tag
         id: get-release
         uses: actions/github-script@v8
