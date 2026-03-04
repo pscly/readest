@@ -260,14 +260,31 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
     setIsSyncing(true);
     try {
       const result = await runWebDavSyncOnce(appService);
+      const opCount = result.operations.length;
+      const warningCount = result.warnings.length;
       const message =
-        result.warnings.length > 0
-          ? _('Synced {{count}} item(s) with {{warnings}} warning(s)', {
-              count: result.operations.length,
-              warnings: result.warnings.length,
-            })
-          : _('Synced {{count}} item(s)', { count: result.operations.length });
+        opCount === 0
+          ? _('Sync completed: no changes')
+          : warningCount > 0
+            ? _('Synced {{count}} item(s) with {{warnings}} warning(s)', {
+                count: opCount,
+                warnings: warningCount,
+              })
+            : _('Synced {{count}} item(s)', { count: opCount });
       eventDispatcher.dispatch('toast', { message, type: 'info' });
+      eventDispatcher.dispatch('webdav-sync-finished', {
+        finishedAtMs: Date.now(),
+        operationsCount: opCount,
+        warningsCount: warningCount,
+        touchedPaths: result.operations
+          .map((operation) => {
+            if (operation.type === 'trash_local' || operation.type === 'trash_remote') {
+              return operation.originalPath;
+            }
+            return operation.path;
+          })
+          .filter((path): path is string => typeof path === 'string' && path.length > 0),
+      });
     } catch (error) {
       const classified = classifyWebDavSyncError(error);
       eventDispatcher.dispatch('toast', { message: _(classified.message), type: classified.type });

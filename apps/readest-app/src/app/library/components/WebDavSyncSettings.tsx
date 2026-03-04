@@ -240,10 +240,25 @@ export const WebDavSyncSettingsWindow: React.FC = () => {
       const opCount = result.operations.length;
       const warningCount = result.warnings.length;
       const message =
-        warningCount > 0
-          ? `同步完成：${opCount} 项（${warningCount} 条警告）`
-          : `同步完成：${opCount} 项`;
+        opCount === 0
+          ? '同步完成：无变更'
+          : warningCount > 0
+            ? `同步完成：${opCount} 项（${warningCount} 条警告）`
+            : `同步完成：${opCount} 项`;
       eventDispatcher.dispatch('toast', { message: _(message), type: 'info' });
+      eventDispatcher.dispatch('webdav-sync-finished', {
+        finishedAtMs: Date.now(),
+        operationsCount: opCount,
+        warningsCount: warningCount,
+        touchedPaths: result.operations
+          .map((operation) => {
+            if (operation.type === 'trash_local' || operation.type === 'trash_remote') {
+              return operation.originalPath;
+            }
+            return operation.path;
+          })
+          .filter((path): path is string => typeof path === 'string' && path.length > 0),
+      });
     } catch (error) {
       const classified = classifyWebDavError(error);
       eventDispatcher.dispatch('toast', { message: _(classified.message), type: classified.type });

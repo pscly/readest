@@ -258,6 +258,23 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [envConfig, appService]);
 
+  const handleWebDavSyncFinished = useCallback(
+    async (_event: CustomEvent) => {
+      if (settings.syncBackend !== 'webdav') {
+        return;
+      }
+      await handleRefreshLibrary();
+    },
+    [handleRefreshLibrary, settings.syncBackend],
+  );
+
+  useEffect(() => {
+    eventDispatcher.on('webdav-sync-finished', handleWebDavSyncFinished);
+    return () => {
+      eventDispatcher.off('webdav-sync-finished', handleWebDavSyncFinished);
+    };
+  }, [handleWebDavSyncFinished]);
+
   useEffect(() => {
     if (appService?.hasWindow) {
       const currentWebview = getCurrentWebview();

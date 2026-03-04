@@ -492,6 +492,7 @@
   "Password cleared": "密码已清除",
   "Sync Now": "立即同步",
   "Sync is turned off": "同步已关闭",
+  "Sync completed: no changes": "同步完成：无变更",
   "Synced {{count}} item(s)": "已同步 {{count}} 项",
   "Synced {{count}} item(s) with {{warnings}} warning(s)": "已同步 {{count}} 项（{{warnings}} 条警告）",
   "Sync Strategy": "同步策略",

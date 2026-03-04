@@ -32,6 +32,9 @@ describe('mergeLibraryJson', () => {
     const merged = JSON.parse(result.mergedJson) as Book[];
 
     expect(result.warnings).toEqual([]);
+    expect(result.conflictCopies).toEqual([]);
+    expect(result.writeLocal).toBe(true);
+    expect(result.writeRemote).toBe(true);
     expect(merged.map((book) => book.hash)).toEqual(['book-a', 'book-b']);
   });
 
@@ -60,6 +63,9 @@ describe('mergeLibraryJson', () => {
     });
     const merged = JSON.parse(result.mergedJson) as Book[];
 
+    expect(result.conflictCopies).toEqual([]);
+    expect(result.writeLocal).toBe(true);
+    expect(result.writeRemote).toBe(true);
     expect(merged).toHaveLength(1);
     expect(merged[0]?.progress).toEqual([50, 100]);
     expect(merged[0]?.updatedAt).toBe(300);
@@ -80,8 +86,92 @@ describe('mergeLibraryJson', () => {
     });
     const merged = JSON.parse(result.mergedJson) as Book[];
 
+    expect(result.conflictCopies).toEqual([]);
+    expect(result.writeLocal).toBe(true);
+    expect(result.writeRemote).toBe(true);
     expect(merged).toHaveLength(1);
     expect(merged[0]?.hash).toBe('book-deleted');
     expect(merged[0]?.deletedAt).toBe(200);
+  });
+
+  it('keeps remote intact when local is corrupted (writes local only)', () => {
+    const localLibraryJson = '{invalid-json';
+    const remoteLibraryJson = JSON.stringify([createBook({ hash: 'book-remote', updatedAt: 123 })]);
+
+    const result = mergeLibraryJson({
+      localLibraryJson,
+      remoteLibraryJson,
+      nowMs: NOW_MS,
+      deviceId: 'device-a',
+    });
+
+    const merged = JSON.parse(result.mergedJson) as Book[];
+    expect(merged.map((book) => book.hash)).toEqual(['book-remote']);
+    expect(result.writeLocal).toBe(true);
+    expect(result.writeRemote).toBe(false);
+    expect(result.conflictCopies).toHaveLength(1);
+    expect(result.conflictCopies[0]?.relativePath).toContain(
+      'Books/conflicts/library.conflict.local.device-a',
+    );
+    expect(result.conflictCopies[0]?.json).toBe(localLibraryJson);
+  });
+
+  it('skips overwrite when remote is corrupted and local is empty', () => {
+    const localLibraryJson = JSON.stringify([]);
+    const remoteLibraryJson = '{corrupted';
+
+    const result = mergeLibraryJson({
+      localLibraryJson,
+      remoteLibraryJson,
+      nowMs: NOW_MS,
+      deviceId: 'device-a',
+    });
+
+    expect(result.writeLocal).toBe(false);
+    expect(result.writeRemote).toBe(false);
+    expect(result.conflictCopies).toHaveLength(1);
+    expect(result.conflictCopies[0]?.relativePath).toContain(
+      'Books/conflicts/library.conflict.remote.device-a',
+    );
+    expect(result.conflictCopies[0]?.json).toBe(remoteLibraryJson);
+    expect(result.warnings.join('\n')).toContain('本地书库为空');
+  });
+
+  it('repairs remote when remote is corrupted but local has data', () => {
+    const localLibraryJson = JSON.stringify([createBook({ hash: 'book-local', updatedAt: 100 })]);
+    const remoteLibraryJson = '{corrupted';
+
+    const result = mergeLibraryJson({
+      localLibraryJson,
+      remoteLibraryJson,
+      nowMs: NOW_MS,
+      deviceId: 'device-a',
+    });
+
+    const merged = JSON.parse(result.mergedJson) as Book[];
+    expect(merged.map((book) => book.hash)).toEqual(['book-local']);
+    expect(result.writeLocal).toBe(true);
+    expect(result.writeRemote).toBe(true);
+    expect(result.conflictCopies).toHaveLength(1);
+    expect(result.conflictCopies[0]?.relativePath).toContain(
+      'Books/conflicts/library.conflict.remote.device-a',
+    );
+  });
+
+  it('skips overwrite when both sides are corrupted', () => {
+    const localLibraryJson = '{bad-local';
+    const remoteLibraryJson = '{bad-remote';
+
+    const result = mergeLibraryJson({
+      localLibraryJson,
+      remoteLibraryJson,
+      nowMs: NOW_MS,
+      deviceId: 'device-a',
+    });
+
+    expect(result.writeLocal).toBe(false);
+    expect(result.writeRemote).toBe(false);
+    expect(result.conflictCopies).toHaveLength(2);
+    expect(result.warnings.join('\n')).toContain('都无法解析');
   });
 });

@@ -2,20 +2,32 @@ import { Book, ReadingStatus } from '@/types/book';
 
 type Side = 'local' | 'remote';
 
+type ParseStatus = 'missing' | 'ok' | 'failed';
+
 interface ParsedLibraryResult {
   books: Book[];
-  parseFailed: boolean;
+  status: ParseStatus;
+  raw: string | null;
 }
 
 export interface MergeLibraryInput {
   localLibraryJson: string | null;
   remoteLibraryJson: string | null;
   nowMs?: number;
+  deviceId?: string;
+}
+
+export interface LibraryConflictCopy {
+  relativePath: string;
+  json: string;
 }
 
 export interface MergeLibraryResult {
   mergedJson: string;
+  conflictCopies: LibraryConflictCopy[];
   warnings: string[];
+  writeLocal: boolean;
+  writeRemote: boolean;
 }
 
 const READING_STATUS_RANK: Record<ReadingStatus, number> = {
@@ -49,7 +61,7 @@ const parseLibraryJson = (
   warnings: string[],
 ): ParsedLibraryResult => {
   if (libraryJson === null) {
-    return { books: [], parseFailed: false };
+    return { books: [], status: 'missing', raw: null };
   }
 
   try {
@@ -73,11 +85,11 @@ const parseLibraryJson = (
       books.push(item as unknown as Book);
     }
 
-    return { books, parseFailed: false };
+    return { books, status: 'ok', raw: libraryJson };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     warnings.push(`${side} library.json 解析失败：${message}`);
-    return { books: [], parseFailed: true };
+    return { books: [], status: 'failed', raw: libraryJson };
   }
 };
 
@@ -204,49 +216,132 @@ const mergeBooks = (localBooks: Book[], remoteBooks: Book[], fallbackTs: number)
   return [...mergedBooks, ...remoteOnlyBooks];
 };
 
+const buildConflictPath = (params: {
+  side: Side;
+  deviceId: string;
+  ts: number;
+  index: number;
+}): string => {
+  const safeDevice = params.deviceId || 'device';
+  if (params.index === 0) {
+    return `Books/conflicts/library.conflict.${params.side}.${safeDevice}.${params.ts}.json`;
+  }
+  return `Books/conflicts/library.conflict.${params.side}.${safeDevice}.${params.ts}.${params.index}.json`;
+};
+
 export const mergeLibraryJson = ({
   localLibraryJson,
   remoteLibraryJson,
   nowMs,
+  deviceId,
 }: MergeLibraryInput): MergeLibraryResult => {
   const warnings: string[] = [];
   const ts = nowMs ?? Date.now();
+  const sourceDeviceId = deviceId ?? 'device';
+  const conflictCopies: LibraryConflictCopy[] = [];
+  const conflictIndexBySide: Record<Side, number> = { local: 0, remote: 0 };
 
   const parsedLocal = parseLibraryJson(localLibraryJson, 'local', warnings);
   const parsedRemote = parseLibraryJson(remoteLibraryJson, 'remote', warnings);
 
-  if (parsedLocal.parseFailed && !parsedRemote.parseFailed) {
+  const pushConflictCopy = (side: Side, raw: string | null) => {
+    if (raw === null) {
+      return;
+    }
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return;
+    }
+    const index = conflictIndexBySide[side];
+    conflictIndexBySide[side] += 1;
+    conflictCopies.push({
+      relativePath: buildConflictPath({
+        side,
+        deviceId: sourceDeviceId,
+        ts,
+        index,
+      }),
+      json: raw,
+    });
+  };
+
+  if (parsedLocal.status === 'failed') {
+    pushConflictCopy('local', parsedLocal.raw);
+  }
+  if (parsedRemote.status === 'failed') {
+    pushConflictCopy('remote', parsedRemote.raw);
+  }
+
+  const normalizedLocalJson = JSON.stringify(
+    parsedLocal.books.map((book) => normalizeBook(book, ts)),
+    null,
+    2,
+  );
+  const normalizedRemoteJson = JSON.stringify(
+    parsedRemote.books.map((book) => normalizeBook(book, ts)),
+    null,
+    2,
+  );
+
+  if (parsedLocal.status === 'ok' && parsedRemote.status === 'ok') {
+    const mergedBooks = mergeBooks(parsedLocal.books, parsedRemote.books, ts);
     return {
-      mergedJson: JSON.stringify(
-        parsedRemote.books.map((book) => normalizeBook(book, ts)),
-        null,
-        2,
-      ),
+      mergedJson: JSON.stringify(mergedBooks, null, 2),
+      conflictCopies,
       warnings,
+      writeLocal: true,
+      writeRemote: true,
     };
   }
 
-  if (parsedRemote.parseFailed && !parsedLocal.parseFailed) {
+  if (parsedRemote.status === 'ok' && parsedLocal.status !== 'ok') {
     return {
-      mergedJson: JSON.stringify(
-        parsedLocal.books.map((book) => normalizeBook(book, ts)),
-        null,
-        2,
-      ),
+      mergedJson: normalizedRemoteJson,
+      conflictCopies,
       warnings,
+      writeLocal: true,
+      writeRemote: false,
     };
   }
 
-  if (parsedLocal.parseFailed && parsedRemote.parseFailed) {
+  if (parsedLocal.status === 'ok' && parsedRemote.status === 'missing') {
     return {
-      mergedJson: JSON.stringify([], null, 2),
+      mergedJson: normalizedLocalJson,
+      conflictCopies,
       warnings,
+      writeLocal: true,
+      writeRemote: true,
     };
   }
 
-  const mergedBooks = mergeBooks(parsedLocal.books, parsedRemote.books, ts);
+  if (parsedLocal.status === 'ok' && parsedRemote.status === 'failed') {
+    if (parsedLocal.books.length === 0) {
+      warnings.push(
+        '远端 library.json 解析失败，且本地书库为空：为避免覆盖远端数据，本次跳过合并写入',
+      );
+      return {
+        mergedJson: normalizedLocalJson,
+        conflictCopies,
+        warnings,
+        writeLocal: false,
+        writeRemote: false,
+      };
+    }
+    return {
+      mergedJson: normalizedLocalJson,
+      conflictCopies,
+      warnings,
+      writeLocal: true,
+      writeRemote: true,
+    };
+  }
+
+  warnings.push('本地与远端 library.json 都无法解析：为避免数据丢失，本次跳过覆盖写入');
   return {
-    mergedJson: JSON.stringify(mergedBooks, null, 2),
+    mergedJson: JSON.stringify([], null, 2),
+    conflictCopies,
     warnings,
+    writeLocal: false,
+    writeRemote: false,
   };
 };

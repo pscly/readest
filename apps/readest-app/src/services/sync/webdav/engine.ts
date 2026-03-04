@@ -1209,7 +1209,8 @@ export async function syncWebDavMetadataOnce(
             }
 
             const needsBackup =
-              operation.path === 'Settings/settings.json' || operation.path === 'Books/library.json';
+              operation.path === 'Settings/settings.json' ||
+              operation.path === 'Books/library.json';
             if (needsBackup) {
               await writeLocalJsonWithBak({
                 fs: params.fs,
@@ -1336,30 +1337,60 @@ export async function syncWebDavMetadataOnce(
               localLibraryJson: localText,
               remoteLibraryJson: remoteText,
               nowMs,
+              deviceId: params.deviceId,
             });
 
             try {
-              await ensureRemoteDirs(params.client, parentRemoteDir(operation.path));
-              await params.client.putText(
-                operation.path,
-                result.mergedJson,
-                'application/json',
-                precondition,
-              );
-              await writeLocalJsonWithBak({
-                fs: params.fs,
-                mainAbsolutePath: localAbs,
-                jsonText: result.mergedJson,
-              });
               warnings.push(...result.warnings);
-              updateManifestEntry(
-                remoteManifest,
-                await toManifestEntryFromText({
-                  path: operation.path,
-                  text: result.mergedJson,
-                  modifiedAtMs: nowMs,
-                }),
-              );
+
+              if (result.writeRemote) {
+                await ensureRemoteDirs(params.client, parentRemoteDir(operation.path));
+                await params.client.putText(
+                  operation.path,
+                  result.mergedJson,
+                  'application/json',
+                  precondition,
+                );
+                updateManifestEntry(
+                  remoteManifest,
+                  await toManifestEntryFromText({
+                    path: operation.path,
+                    text: result.mergedJson,
+                    modifiedAtMs: nowMs,
+                  }),
+                );
+              }
+
+              if (result.writeLocal) {
+                await writeLocalJsonWithBak({
+                  fs: params.fs,
+                  mainAbsolutePath: localAbs,
+                  jsonText: result.mergedJson,
+                });
+              }
+
+              for (const copy of result.conflictCopies) {
+                if (isMetaPath(copy.relativePath)) {
+                  continue;
+                }
+                const abs = resolveLocalPath(params.scope, copy.relativePath);
+                if (!abs) {
+                  continue;
+                }
+                await ensureRemoteDirs(params.client, parentRemoteDir(copy.relativePath));
+                await params.fs.mkdirp(dirname(abs));
+                await params.fs.writeFileAtomic(abs, encodeUtf8(copy.json));
+                await params.client.putText(copy.relativePath, copy.json, 'application/json');
+                updateManifestEntry(
+                  remoteManifest,
+                  await toManifestEntryFromText({
+                    path: copy.relativePath,
+                    text: copy.json,
+                    modifiedAtMs: nowMs,
+                  }),
+                );
+              }
+
               break;
             } catch (error) {
               if (isPreconditionFailedError(error) && attempt < MERGE_JSON_MAX_RETRIES) {

@@ -61,7 +61,20 @@ export const useWebDavAutoSync = () => {
       lastAutoSyncAtRef.current = now;
       setIsSyncing(true);
       try {
-        await runWebDavSyncOnce(appService);
+        const result = await runWebDavSyncOnce(appService);
+        eventDispatcher.dispatch('webdav-sync-finished', {
+          finishedAtMs: Date.now(),
+          operationsCount: result.operations.length,
+          warningsCount: result.warnings.length,
+          touchedPaths: result.operations
+            .map((operation) => {
+              if (operation.type === 'trash_local' || operation.type === 'trash_remote') {
+                return operation.originalPath;
+              }
+              return operation.path;
+            })
+            .filter((path): path is string => typeof path === 'string' && path.length > 0),
+        });
       } catch (error) {
         if (error instanceof WebDavSyncAlreadyRunningError) {
           return;
