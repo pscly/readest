@@ -1167,12 +1167,126 @@ jobs:
 
           echo "Critical release assets verification passed."
 
+  update-release-download-links:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [get-release, verify-release-assets]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: update release body (downloads section)
+        uses: actions/github-script@v8
+        env:
+          RELEASE_ID: ${{ needs['get-release'].outputs.release_id }}
+          RELEASE_VERSION: ${{ needs['get-release'].outputs.release_version }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const releaseId = Number(process.env.RELEASE_ID);
+            if (!Number.isFinite(releaseId) || releaseId <= 0) {
+              core.setFailed(`Invalid RELEASE_ID: ${process.env.RELEASE_ID}`);
+              return;
+            }
+
+            const version = (process.env.RELEASE_VERSION || '').trim();
+            if (!version) {
+              core.setFailed('RELEASE_VERSION is empty.');
+              return;
+            }
+
+            const releaseResponse = await github.rest.repos.getRelease({
+              owner,
+              repo,
+              release_id: releaseId,
+            });
+            const release = releaseResponse.data;
+            const oldBody = release.body || '';
+
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: releaseId,
+              per_page: 100,
+            });
+
+            const assetByName = new Map();
+            for (const asset of assets) {
+              if (asset && asset.name && asset.browser_download_url) {
+                assetByName.set(asset.name, asset.browser_download_url);
+              }
+            }
+
+            const required = [
+              { label: 'Windows 安装包（x64）', name: `Readest_${version}_x64-setup.exe` },
+              { label: 'Windows 便携版（x64）', name: `Readest_${version}_x64-portable.exe` },
+              { label: 'Android（通用）', name: `Readest_${version}_universal.apk` },
+              { label: 'Android（ARM64）', name: `Readest_${version}_arm64.apk` },
+              { label: 'Linux（AppImage x86_64）', name: `Readest_${version}_amd64.AppImage` },
+            ];
+
+            const missing = required.filter((item) => !assetByName.get(item.name));
+            if (missing.length > 0) {
+              core.setFailed(
+                `Missing release assets for downloads section: ${missing.map((m) => m.name).join(', ')}`,
+              );
+              return;
+            }
+
+            const downloadsLines = required.map((item) => {
+              const url = assetByName.get(item.name);
+              return `- ${item.label}：[${item.name}](${url})`;
+            });
+
+            const startMarker = '<!-- AUTO-DOWNLOADS:START -->';
+            const endMarker = '<!-- AUTO-DOWNLOADS:END -->';
+            const block = [
+              startMarker,
+              '## 更新下载',
+              '',
+              ...downloadsLines,
+              '',
+              '> 其他平台/签名文件请展开下方 Assets。',
+              endMarker,
+            ].join('\\n');
+
+            let nextBody = oldBody.trim();
+            const startIndex = nextBody.indexOf(startMarker);
+            const endIndex = nextBody.indexOf(endMarker);
+            if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+              nextBody =
+                nextBody.slice(0, startIndex).trimEnd() +
+                '\\n\\n' +
+                block +
+                '\\n\\n' +
+                nextBody.slice(endIndex + endMarker.length).trimStart();
+            } else {
+              nextBody = block + (nextBody ? `\\n\\n${nextBody}` : '');
+            }
+
+            await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: releaseId,
+              body: nextBody.trim() + '\\n',
+            });
+
+            core.info('Release body updated with downloads section.');
+
   upload-to-r2:
     if: >
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       vars.ENABLE_R2_UPLOAD == 'true'
     needs:
-      [get-release, build-tauri, upload-release-metadata, update-latest-json, verify-release-assets]
+      [
+        get-release,
+        build-tauri,
+        upload-release-metadata,
+        update-latest-json,
+        verify-release-assets,
+        update-release-download-links,
+      ]
     uses: ./.github/workflows/upload-to-r2.yml
     with:
       tag: ${{ needs['get-release'].outputs.release_tag }}
@@ -1189,6 +1303,7 @@ jobs:
       needs['upload-release-metadata'].result == 'success' &&
       needs['update-latest-json'].result == 'success' &&
       needs['verify-release-assets'].result == 'success' &&
+      needs['update-release-download-links'].result == 'success' &&
       (needs['upload-to-r2'].result == 'success' || needs['upload-to-r2'].result == 'skipped')
     needs:
       [
@@ -1199,6 +1314,7 @@ jobs:
         upload-release-metadata,
         update-latest-json,
         verify-release-assets,
+        update-release-download-links,
         upload-to-r2,
       ]
     permissions:
