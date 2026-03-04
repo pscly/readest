@@ -59,6 +59,16 @@
   <launchable type="desktop-id">com.bilingify.readest.desktop</launchable>
 
   <releases>
+    <release version="0.9.115" date="2026-03-04">
+      <description>
+        <ul>
+          <li>WebDAV: Improved sync performance with concurrent transfers and local checksum cache</li>
+          <li>WebDAV: Settings UI is now fully localized in Chinese by default (zh-CN)</li>
+          <li>Release: GitHub Releases now include direct download links automatically</li>
+          <li>Upstream: Synced latest changes from readest/readest</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.9.114" date="2026-03-04">
       <description>
         <ul>
