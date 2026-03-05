@@ -112,6 +112,7 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
 };
 
 export const DEFAULT_MOBILE_SYSTEM_SETTINGS: Partial<SystemSettings> = {
+  syncBackend: 'webdav' as SystemSettings['syncBackend'],
   libraryColumns: 3,
 };
 

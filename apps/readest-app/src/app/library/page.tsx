@@ -18,6 +18,7 @@ import { throttle } from '@/utils/throttle';
 import { transferManager } from '@/services/transferManager';
 import { getDirPath, getFilename, joinPaths } from '@/utils/path';
 import { parseOpenWithFiles } from '@/helpers/openWith';
+import { computeCloudLoginStartupDecision } from '@/helpers/cloudLoginPolicy';
 import { isTauriAppPlatform, isWebAppPlatform } from '@/services/environment';
 import { checkForAppUpdates, checkAppReleaseNotes } from '@/helpers/updater';
 import { impactFeedback } from '@tauri-apps/plugin-haptics';
@@ -397,13 +398,19 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     const initLogin = async () => {
       const appService = await envConfig.getAppService();
       const settings = await appService.loadSettings();
-      if (token && user) {
-        if (!settings.keepLogin) {
-          settings.keepLogin = true;
-          setSettings(settings);
-          saveSettings(envConfig, settings);
-        }
-      } else if (settings.keepLogin) {
+
+      const decision = computeCloudLoginStartupDecision({
+        keepLogin: settings.keepLogin,
+        hasSession: Boolean(token && user),
+      });
+
+      if (decision.shouldPersist && decision.nextKeepLogin !== settings.keepLogin) {
+        settings.keepLogin = decision.nextKeepLogin;
+        setSettings(settings);
+        saveSettings(envConfig, settings);
+      }
+
+      if (decision.shouldNavigateToAuth) {
         router.push('/auth');
       }
     };
@@ -866,11 +873,11 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
             'progress progress-success absolute bottom-0 left-0 right-0 h-1 translate-y-[2px] transition-opacity duration-200 sm:translate-y-[4px]',
             isSyncing ? 'opacity-100' : 'opacity-0',
           )}
-          value={syncProgress * 100}
+          value={isSyncing && syncProgress > 0 ? syncProgress * 100 : undefined}
           max='100'
         />
       </div>
-      {(loading || isSyncing) && (
+      {loading && (
         <div className='fixed inset-0 z-50 flex items-center justify-center'>
           <Spinner loading />
         </div>

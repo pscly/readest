@@ -59,6 +59,15 @@
   <launchable type="desktop-id">com.bilingify.readest.desktop</launchable>
 
   <releases>
+    <release version="0.9.117" date="2026-03-05">
+      <description>
+        <ul>
+          <li>Mobile: Stop forcing cloud sign-in when the session is missing (no more login pop-ups on startup)</li>
+          <li>Mobile: Default sync backend is now WebDAV</li>
+          <li>UI: WebDAV sync runs in the background without blocking the library UI</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.9.116" date="2026-03-04">
       <description>
         <ul>
