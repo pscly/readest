@@ -8,14 +8,17 @@ const {
   setIsSyncingMock,
   onPullLibraryMock,
   eventDispatchMock,
+  navigateToLoginMock,
   themeSetModeMock,
   settingsState,
   appService,
+  mobileSyncState,
 } = vi.hoisted(() => ({
   runWebDavSyncOnceMock: vi.fn(),
   setIsSyncingMock: vi.fn(),
   onPullLibraryMock: vi.fn(),
   eventDispatchMock: vi.fn(),
+  navigateToLoginMock: vi.fn(),
   themeSetModeMock: vi.fn(),
   settingsState: {
     autoUpload: true,
@@ -33,6 +36,15 @@ const {
     lastSyncedAtBooks: 0,
     syncBackend: 'cloud' as 'cloud' | 'webdav' | 'off',
   },
+  mobileSyncState: {
+    needsAuthForCloud: false,
+    pendingChanges: false,
+    lastSuccessfulSyncAt: 0,
+    lastAttemptedSyncAt: 0,
+    lastSyncError: null as string | null,
+    isOnline: true,
+    lastOnlineAt: 0,
+  },
   appService: {
     isMobile: false,
     hasUpdater: false,
@@ -46,6 +58,11 @@ const {
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
+
+vi.mock('@/utils/nav', () => ({
+  navigateToLogin: navigateToLoginMock,
+  navigateToProfile: vi.fn(),
 }));
 
 vi.mock('@/hooks/useTranslation', () => ({
@@ -104,6 +121,21 @@ vi.mock('@/store/settingsStore', () => ({
     settings: settingsState,
     setSettingsDialogOpen: vi.fn(),
   }),
+}));
+
+vi.mock('@/store/mobileSyncStore', () => ({
+  useMobileSyncStore: ((
+    selector?: (state: typeof mobileSyncState & Record<string, unknown>) => unknown,
+  ) => {
+    const state = {
+      ...mobileSyncState,
+      markSyncAttempted: vi.fn(),
+      markSyncSucceeded: vi.fn(),
+      markSyncFailed: vi.fn(),
+      resetSyncError: vi.fn(),
+    };
+    return selector ? selector(state) : state;
+  }) as unknown as typeof import('@/store/mobileSyncStore').useMobileSyncStore,
 }));
 
 vi.mock('@/store/libraryStore', () => ({
@@ -165,6 +197,7 @@ describe('SettingsMenu sync backend', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     settingsState.syncBackend = 'cloud';
+    mobileSyncState.needsAuthForCloud = false;
     runWebDavSyncOnceMock.mockResolvedValue({ operations: [], warnings: [] });
     eventDispatchMock.mockResolvedValue(undefined);
   });
@@ -178,11 +211,26 @@ describe('SettingsMenu sync backend', () => {
 
     render(<SettingsMenu onPullLibrary={onPullLibraryMock} />);
 
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Never synced' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Never synced/i }));
 
     await waitFor(() => {
       expect(onPullLibraryMock).toHaveBeenCalledWith(true, true);
     });
+    expect(runWebDavSyncOnceMock).not.toHaveBeenCalled();
+  });
+
+  it('cloud 会话失效时，手动点击同步才会跳登录，不会继续触发 pull', async () => {
+    settingsState.syncBackend = 'cloud';
+    mobileSyncState.needsAuthForCloud = true;
+
+    render(<SettingsMenu onPullLibrary={onPullLibraryMock} />);
+
+    fireEvent.click(screen.getByRole('menuitem', { name: /Never synced/i }));
+
+    await waitFor(() => {
+      expect(navigateToLoginMock).toHaveBeenCalled();
+    });
+    expect(onPullLibraryMock).not.toHaveBeenCalled();
     expect(runWebDavSyncOnceMock).not.toHaveBeenCalled();
   });
 

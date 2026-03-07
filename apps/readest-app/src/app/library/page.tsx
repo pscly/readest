@@ -36,7 +36,6 @@ import { useTheme } from '@/hooks/useTheme';
 import { useUICSS } from '@/hooks/useUICSS';
 import { useDemoBooks } from './hooks/useDemoBooks';
 import { useBooksSync } from './hooks/useBooksSync';
-import { useWebDavAutoSync } from './hooks/useWebDavAutoSync';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useTransferStore } from '@/store/transferStore';
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
@@ -191,7 +190,6 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   useTransferQueue(libraryLoaded);
 
   const { pullLibrary, pushLibrary } = useBooksSync();
-  useWebDavAutoSync();
   const { isDragging } = useDragDropImport();
 
   usePullToRefresh(

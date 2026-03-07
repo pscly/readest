@@ -112,7 +112,7 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
 };
 
 export const DEFAULT_MOBILE_SYSTEM_SETTINGS: Partial<SystemSettings> = {
-  syncBackend: 'webdav' as SystemSettings['syncBackend'],
+  syncBackend: 'webdav',
   libraryColumns: 3,
 };
 
@@ -269,10 +269,6 @@ export const DEFAULT_VIEW_CONFIG: ViewConfig = {
   showRemainingTime: false,
   showRemainingPages: false,
   showProgressInfo: true,
-  showCurrentTime: false,
-  showCurrentBatteryStatus: false,
-  showBatteryPercentage: true,
-  use24HourClock: false,
   tapToToggleFooter: false,
   showMarginsOnScroll: false,
   showPaginationButtons: false,
@@ -313,7 +309,6 @@ export const DEFAULT_NOTE_EXPORT_CONFIG: NoteExportConfig = {
   includeChapterTitles: true,
   includeQuotes: true,
   includeNotes: true,
-  includePageNumber: true,
   includeTimestamp: false,
   includeChapterSeparator: false,
   noteSeparator: '\n\n',
@@ -811,7 +806,6 @@ export const TRANSLATED_LANGS = {
   el: 'Ελληνικά',
   uk: 'Українська',
   pl: 'Polski',
-  sl: 'Slovenščina',
   tr: 'Türkçe',
   hi: 'हिन्दी',
   id: 'Indonesia',

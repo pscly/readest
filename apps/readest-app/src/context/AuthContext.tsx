@@ -3,6 +3,7 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import { User } from '@supabase/supabase-js';
 import { supabase } from '@/utils/supabase';
+import { useMobileSyncStore } from '@/store/mobileSyncStore';
 import posthog from 'posthog-js';
 
 interface AuthContextType {
@@ -34,6 +35,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const syncSession = (
       session: { access_token: string; refresh_token: string; user: User } | null,
     ) => {
+      const { resetSyncError, setNeedsAuthForCloud } = useMobileSyncStore.getState();
       if (session) {
         console.log('Syncing session');
         const { access_token, refresh_token, user } = session;
@@ -43,6 +45,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         posthog.identify(user.id);
         setToken(access_token);
         setUser(user);
+        resetSyncError();
+        setNeedsAuthForCloud(false);
       } else {
         localStorage.removeItem('token');
         localStorage.removeItem('refresh_token');
@@ -71,14 +75,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = (newToken: string, newUser: User) => {
     console.log('Logging in');
+    const { resetSyncError, setNeedsAuthForCloud } = useMobileSyncStore.getState();
     setToken(newToken);
     setUser(newUser);
     localStorage.setItem('token', newToken);
     localStorage.setItem('user', JSON.stringify(newUser));
+    resetSyncError();
+    setNeedsAuthForCloud(false);
   };
 
   const logout = async () => {
     console.log('Logging out');
+    const { setNeedsAuthForCloud } = useMobileSyncStore.getState();
     try {
       await supabase.auth.refreshSession();
     } catch {
@@ -88,6 +96,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       localStorage.removeItem('user');
       setToken(null);
       setUser(null);
+      setNeedsAuthForCloud(false);
     }
   };
 

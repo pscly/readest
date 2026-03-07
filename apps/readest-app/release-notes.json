@@ -1,5 +1,14 @@
 {
   "releases": {
+    "0.10.0": {
+      "date": "2026-03-08",
+      "notes": [
+        "Android: Added offline-first WebDAV sync that resumes automatically when the app returns online or to foreground",
+        "Android: Local library, reading progress, notes, and settings now stay usable offline without blocking the UI",
+        "Mobile: Cloud sync no longer repeatedly interrupts with login prompts unless you manually open a cloud action",
+        "Mobile: Sync status now shows lightweight retry and pending states instead of freezing the library screen"
+      ]
+    },
     "0.9.117": {
       "date": "2026-03-05",
       "notes": [
@@ -534,7 +543,9 @@
     },
     "0.9.57": {
       "date": "2025-06-14",
-      "notes": ["TTS: Fixed an issue to detect custom TTS engines on some Android devices"]
+      "notes": [
+        "TTS: Fixed an issue to detect custom TTS engines on some Android devices"
+      ]
     },
     "0.9.56": {
       "date": "2025-06-13",
@@ -908,7 +919,10 @@
     },
     "0.9.6": {
       "date": "2025-01-18",
-      "notes": ["Various enhancements for mobile platforms", "Fix DeepL translation API"]
+      "notes": [
+        "Various enhancements for mobile platforms",
+        "Fix DeepL translation API"
+      ]
     },
     "0.9.5": {
       "date": "2025-01-15",

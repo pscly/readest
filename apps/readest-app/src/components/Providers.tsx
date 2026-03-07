@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from '@/hooks/useSafeAreaInsets';
 import { useDefaultIconSize } from '@/hooks/useResponsiveSize';
 import { useBackgroundTexture } from '@/hooks/useBackgroundTexture';
 import { useEinkMode } from '@/hooks/useEinkMode';
+import { useWebDavAutoSync } from '@/app/library/hooks/useWebDavAutoSync';
 import { getLocale } from '@/utils/misc';
 import { getDirFromUILanguage } from '@/utils/rtl';
 import { DropdownProvider } from '@/context/DropdownContext';
@@ -25,6 +26,7 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
   const { applyBackgroundTexture } = useBackgroundTexture();
   const { applyEinkMode } = useEinkMode();
   const iconSize = useDefaultIconSize();
+  useWebDavAutoSync();
   useSafeAreaInsets(); // Initialize safe area insets
 
   useEffect(() => {

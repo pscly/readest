@@ -10,6 +10,7 @@ import { transformBookFromDB } from '@/utils/transform';
 import { DBBook, DBBookConfig, DBBookNote } from '@/types/records';
 import { Book, BookConfig, BookDataRecord, BookNote } from '@/types/book';
 import { useReaderStore } from '@/store/readerStore';
+import { useMobileSyncStore } from '@/store/mobileSyncStore';
 import { computeCloudNotAuthenticatedDecision } from '@/helpers/cloudLoginPolicy';
 
 const transformsFromDB = {
@@ -106,6 +107,7 @@ export function useSync(bookKey?: string) {
 
     try {
       const result = await syncClient.pullChanges(since, type, bookId, metaHash);
+      useMobileSyncStore.getState().setNeedsAuthForCloud(false);
       setSyncResult({ ...syncResult, [type]: result[type] });
       const records = result[type];
       if (since > 1000 && !records?.length) return 0;
@@ -143,6 +145,7 @@ export function useSync(bookKey?: string) {
       console.error(err);
       if (err instanceof Error) {
         if (err.message.includes('Not authenticated')) {
+          useMobileSyncStore.getState().setNeedsAuthForCloud(true);
           const decision = computeCloudNotAuthenticatedDecision(settings.keepLogin);
           if (decision.shouldPersist && decision.nextKeepLogin !== settings.keepLogin) {
             settings.keepLogin = decision.nextKeepLogin;
@@ -166,10 +169,14 @@ export function useSync(bookKey?: string) {
 
     try {
       const result = await syncClient.pushChanges(payload);
+      useMobileSyncStore.getState().setNeedsAuthForCloud(false);
       setSyncResult(result);
     } catch (err: unknown) {
       console.error(err);
       if (err instanceof Error) {
+        if (err.message.includes('Not authenticated')) {
+          useMobileSyncStore.getState().setNeedsAuthForCloud(true);
+        }
         setSyncError(err.message || 'Error pushing changes');
       } else {
         setSyncError('Error pushing changes');

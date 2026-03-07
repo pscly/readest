@@ -78,6 +78,7 @@ import {
 import { ClosableFile } from '@/utils/file';
 import { ProgressHandler } from '@/utils/transfer';
 import { TxtToEpubConverter } from '@/utils/txt';
+import { eventDispatcher } from '@/utils/event';
 import { BOOK_FILE_NOT_FOUND_ERROR } from './errors';
 import { CustomTextureInfo } from '@/styles/textures';
 import { CustomFont, CustomFontInfo } from '@/styles/fonts';
@@ -295,9 +296,26 @@ export abstract class BaseAppService implements AppService {
     return settings;
   }
 
+  private shouldNotifyMobileSync(syncBackend?: SystemSettings['syncBackend']) {
+    return this.isMobileApp && (syncBackend ?? this.latestLoadedSettings?.syncBackend) === 'webdav';
+  }
+
+  private notifyMobileSyncLocalChange(scope: 'settings' | 'library' | 'config') {
+    if (!this.shouldNotifyMobileSync()) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      void eventDispatcher.dispatch('mobile-sync-local-change', { scope });
+    });
+  }
+
   async saveSettings(settings: SystemSettings): Promise<void> {
     await this.safeSaveJSON(SETTINGS_FILENAME, 'Settings', settings);
     this.latestLoadedSettings = settings;
+    if (this.shouldNotifyMobileSync(settings.syncBackend)) {
+      this.notifyMobileSyncLocalChange('settings');
+    }
   }
 
   async importFont(file?: string | File): Promise<CustomFontInfo | null> {
@@ -824,6 +842,9 @@ export abstract class BaseAppService implements AppService {
       serializedConfig = JSON.stringify(config);
     }
     await this.fs.writeFile(getConfigFilename(book), 'Books', serializedConfig);
+    if (this.shouldNotifyMobileSync(settings?.syncBackend)) {
+      this.notifyMobileSyncLocalChange('config');
+    }
   }
 
   async generateCoverImageUrl(book: Book): Promise<string> {
@@ -857,6 +878,7 @@ export abstract class BaseAppService implements AppService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const libraryBooks = books.map(({ coverImageUrl, ...rest }) => rest);
     await this.safeSaveJSON(getLibraryFilename(), 'Books', libraryBooks);
+    this.notifyMobileSyncLocalChange('library');
   }
 
   private imageToArrayBuffer(imageUrl?: string, imageFile?: string): Promise<ArrayBuffer> {

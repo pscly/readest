@@ -10,24 +10,43 @@ const {
   runWebDavSyncOnceMock,
   readFileMock,
   setIsSyncingMock,
-  toastDispatchMock,
+  eventListeners,
+  dispatchEventMock,
   settingsState,
   appService,
   librarySyncState,
+  mobileSyncState,
 } = vi.hoisted(() => {
   const runWebDavSyncOnceMock = vi.fn();
   const readFileMock = vi.fn();
-  const toastDispatchMock = vi.fn();
+  const dispatchEventMock = vi.fn(async (event: string, detail?: unknown) => {
+    const listeners = eventListeners.get(event) ?? new Set();
+    const customEvent = new CustomEvent(event, { detail });
+    for (const listener of listeners) {
+      await listener(customEvent);
+    }
+  });
+  const eventListeners = new Map<string, Set<(event: CustomEvent) => Promise<void> | void>>();
   const librarySyncState = { isSyncing: false };
   const setIsSyncingMock = vi.fn((value: boolean) => {
     librarySyncState.isSyncing = value;
   });
+  const mobileSyncState = {
+    pendingChanges: false,
+    lastSuccessfulSyncAt: 0,
+    lastAttemptedSyncAt: 0,
+    lastSyncError: null as string | null,
+    needsAuthForCloud: false,
+    isOnline: true,
+    lastOnlineAt: 0,
+  };
 
   return {
     runWebDavSyncOnceMock,
     readFileMock,
     setIsSyncingMock,
-    toastDispatchMock,
+    eventListeners,
+    dispatchEventMock,
     settingsState: {
       syncBackend: 'webdav' as 'webdav' | 'cloud' | 'off',
     },
@@ -35,6 +54,7 @@ const {
       readFile: readFileMock,
     },
     librarySyncState,
+    mobileSyncState,
   };
 });
 
@@ -56,9 +76,59 @@ vi.mock('@/hooks/useTranslation', () => ({
 
 vi.mock('@/utils/event', () => ({
   eventDispatcher: {
-    dispatch: toastDispatchMock,
+    on: (event: string, callback: (event: CustomEvent) => Promise<void> | void) => {
+      if (!eventListeners.has(event)) {
+        eventListeners.set(event, new Set());
+      }
+      eventListeners.get(event)?.add(callback);
+    },
+    off: (event: string, callback: (event: CustomEvent) => Promise<void> | void) => {
+      eventListeners.get(event)?.delete(callback);
+    },
+    dispatch: dispatchEventMock,
   },
 }));
+
+vi.mock('@/store/mobileSyncStore', () => {
+  const state = {
+    ...mobileSyncState,
+    markLocalChangePending: vi.fn(() => {
+      mobileSyncState.pendingChanges = true;
+    }),
+    markSyncAttempted: vi.fn(() => {
+      mobileSyncState.lastAttemptedSyncAt = Date.now();
+    }),
+    markSyncSucceeded: vi.fn(() => {
+      mobileSyncState.pendingChanges = false;
+      mobileSyncState.lastSyncError = null;
+      mobileSyncState.lastSuccessfulSyncAt = Date.now();
+    }),
+    markSyncFailed: vi.fn((message: string) => {
+      mobileSyncState.pendingChanges = true;
+      mobileSyncState.lastSyncError = message;
+    }),
+    setNeedsAuthForCloud: vi.fn((value: boolean) => {
+      mobileSyncState.needsAuthForCloud = value;
+    }),
+    setOnline: vi.fn((value: boolean) => {
+      mobileSyncState.isOnline = value;
+    }),
+    resetSyncError: vi.fn(() => {
+      mobileSyncState.lastSyncError = null;
+    }),
+  };
+
+  const useMobileSyncStore = ((selector?: (state: typeof state) => unknown) =>
+    selector
+      ? selector(state)
+      : state) as unknown as typeof import('@/store/mobileSyncStore').useMobileSyncStore;
+
+  Object.assign(useMobileSyncStore, {
+    getState: () => state,
+  });
+
+  return { useMobileSyncStore };
+});
 
 vi.mock('@/services/sync/webdav/runOnce', () => ({
   WebDavSyncNotConfiguredError: class WebDavSyncNotConfiguredError extends Error {
@@ -107,6 +177,13 @@ const setVisibilityState = (state: DocumentVisibilityState) => {
   });
 };
 
+const setNavigatorOnline = (online: boolean) => {
+  Object.defineProperty(window.navigator, 'onLine', {
+    configurable: true,
+    value: online,
+  });
+};
+
 describe('useWebDavAutoSync', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -114,6 +191,12 @@ describe('useWebDavAutoSync', () => {
     vi.clearAllMocks();
     librarySyncState.isSyncing = false;
     settingsState.syncBackend = 'webdav';
+    mobileSyncState.pendingChanges = false;
+    mobileSyncState.lastAttemptedSyncAt = 0;
+    mobileSyncState.lastSuccessfulSyncAt = 0;
+    mobileSyncState.lastSyncError = null;
+    mobileSyncState.needsAuthForCloud = false;
+    mobileSyncState.isOnline = true;
     readFileMock.mockResolvedValue(
       JSON.stringify({
         schemaVersion: 1,
@@ -125,6 +208,7 @@ describe('useWebDavAutoSync', () => {
     );
     runWebDavSyncOnceMock.mockResolvedValue({ operations: [], warnings: [] });
     setVisibilityState('visible');
+    setNavigatorOnline(true);
   });
 
   afterEach(() => {
@@ -151,7 +235,7 @@ describe('useWebDavAutoSync', () => {
     expect(runWebDavSyncOnceMock).toHaveBeenCalledTimes(1);
     expect(setIsSyncingMock).toHaveBeenCalledWith(true);
     expect(setIsSyncingMock).toHaveBeenLastCalledWith(false);
-    expect(toastDispatchMock).not.toHaveBeenCalled();
+    expect(dispatchEventMock).not.toHaveBeenCalledWith('toast', expect.anything());
   });
 
   it('backend=cloud 时不会触发 WebDAV 自动同步', async () => {
@@ -190,6 +274,38 @@ describe('useWebDavAutoSync', () => {
     expect(runWebDavSyncOnceMock).toHaveBeenCalledTimes(2);
   });
 
+  it('本地数据变更事件在节流窗口后会触发一次自动同步', async () => {
+    render(<HookHarness />);
+    await flushAsync();
+    expect(runWebDavSyncOnceMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(WEBDAV_AUTO_SYNC_THROTTLE_MS + 1);
+    await dispatchEventMock('mobile-sync-local-change', { scope: 'library' });
+    await flushAsync();
+
+    expect(runWebDavSyncOnceMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('离线期间累计的本地改动会在恢复在线后自动补同步', async () => {
+    render(<HookHarness />);
+    await flushAsync();
+    expect(runWebDavSyncOnceMock).toHaveBeenCalledTimes(1);
+
+    setNavigatorOnline(false);
+    window.dispatchEvent(new Event('offline'));
+    await vi.advanceTimersByTimeAsync(WEBDAV_AUTO_SYNC_THROTTLE_MS + 1);
+    await dispatchEventMock('mobile-sync-local-change', { scope: 'settings' });
+    await flushAsync();
+
+    expect(runWebDavSyncOnceMock).toHaveBeenCalledTimes(1);
+
+    setNavigatorOnline(true);
+    window.dispatchEvent(new Event('online'));
+    await flushAsync();
+
+    expect(runWebDavSyncOnceMock).toHaveBeenCalledTimes(2);
+  });
+
   it('卸载时会移除 visibilitychange 监听', async () => {
     const { unmount } = render(<HookHarness />);
     await flushAsync();
@@ -201,5 +317,15 @@ describe('useWebDavAutoSync', () => {
     await vi.advanceTimersByTimeAsync(WEBDAV_AUTO_SYNC_THROTTLE_MS + 1);
 
     expect(runWebDavSyncOnceMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('WebDAV 自动同步失败时会保留待同步状态，等待下次自动补偿', async () => {
+    runWebDavSyncOnceMock.mockRejectedValueOnce(new Error('network down'));
+
+    render(<HookHarness />);
+    await flushAsync();
+
+    expect(mobileSyncState.pendingChanges).toBe(true);
+    expect(mobileSyncState.lastSyncError).toBe('network down');
   });
 });

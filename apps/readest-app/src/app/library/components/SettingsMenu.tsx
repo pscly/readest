@@ -14,6 +14,7 @@ import { useEnv } from '@/context/EnvContext';
 import { useThemeStore } from '@/store/themeStore';
 import { useQuotaStats } from '@/hooks/useQuotaStats';
 import { useLibraryStore } from '@/store/libraryStore';
+import { useMobileSyncStore } from '@/store/mobileSyncStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
@@ -57,6 +58,16 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
   const { userProfilePlan, quotas } = useQuotaStats(true);
   const { themeMode, setThemeMode } = useThemeStore();
   const { settings, setSettingsDialogOpen } = useSettingsStore();
+  const {
+    pendingChanges,
+    lastSuccessfulSyncAt,
+    lastSyncError,
+    needsAuthForCloud,
+    markSyncAttempted,
+    markSyncSucceeded,
+    markSyncFailed,
+    resetSyncError,
+  } = useMobileSyncStore();
   const [isAutoUpload, setIsAutoUpload] = useState(settings.autoUpload);
   const [isAutoCheckUpdates, setIsAutoCheckUpdates] = useState(settings.autoCheckUpdates);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(settings.alwaysOnTop);
@@ -245,6 +256,11 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
     }
 
     if (syncBackend === 'cloud') {
+      if (needsAuthForCloud) {
+        navigateToLogin(router);
+        setIsDropdownOpen?.(false);
+        return;
+      }
       onPullLibrary(true, true);
       return;
     }
@@ -258,10 +274,13 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
     }
 
     setIsSyncing(true);
+    markSyncAttempted('manual');
     try {
       const result = await runWebDavSyncOnce(appService);
       const opCount = result.operations.length;
       const warningCount = result.warnings.length;
+      resetSyncError();
+      markSyncSucceeded('manual');
       const message =
         opCount === 0
           ? _('Sync completed: no changes')
@@ -287,6 +306,7 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
       });
     } catch (error) {
       const classified = classifyWebDavSyncError(error);
+      markSyncFailed(error instanceof Error ? error.message : classified.message, 'manual');
       eventDispatcher.dispatch('toast', { message: _(classified.message), type: classified.type });
     } finally {
       setIsSyncing(false);
@@ -340,6 +360,27 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
   const syncBackend = settings.syncBackend ?? 'cloud';
   const syncBackendDescription =
     syncBackend === 'off' ? _('Off') : syncBackend === 'webdav' ? _('WebDAV') : _('Cloud');
+  const syncLabel =
+    syncBackend === 'webdav'
+      ? lastSuccessfulSyncAt
+        ? _('Last synced: {{time}}', { time: formatLocaleDateTime(lastSuccessfulSyncAt) })
+        : _('Never synced')
+      : settings.lastSyncedAtBooks
+        ? _('Synced at {{time}}', {
+            time: formatLocaleDateTime(settings.lastSyncedAtBooks),
+          })
+        : _('Never synced');
+  const syncDescription =
+    syncBackend === 'webdav'
+      ? pendingChanges
+        ? _('Will sync when online')
+        : lastSyncError
+          ? _('Auto-sync will retry when app is active')
+          : ''
+      : needsAuthForCloud
+        ? _('Sign in again to resume sync')
+        : '';
+  const syncIcon = needsAuthForCloud ? MdSyncProblem : MdSync;
 
   return (
     <Menu
@@ -383,14 +424,9 @@ const SettingsMenu: React.FC<SettingsMenuProps> = ({ onPullLibrary, setIsDropdow
               onClick={openTransferQueue}
             />
             <MenuItem
-              label={
-                settings.lastSyncedAtBooks
-                  ? _('Synced at {{time}}', {
-                      time: formatLocaleDateTime(settings.lastSyncedAtBooks),
-                    })
-                  : _('Never synced')
-              }
-              Icon={user ? MdSync : MdSyncProblem}
+              label={syncLabel}
+              description={syncDescription}
+              Icon={syncIcon}
               labelClass='ps-2 pe-1 !mx-0'
               iconClassName={user && isSyncing ? 'animate-reverse-spin' : ''}
               onClick={handleSyncNow}
