@@ -59,6 +59,17 @@
   <launchable type="desktop-id">com.bilingify.readest.desktop</launchable>
 
   <releases>
+    <release version="0.10.1" date="2026-03-08">
+      <description>
+        <ul>
+          <li>Android: Added offline-first WebDAV sync that resumes automatically when the app returns online or to foreground</li>
+          <li>Android: Local library, reading progress, notes, and settings now stay usable offline without blocking the UI</li>
+          <li>Mobile: Cloud sync no longer repeatedly interrupts with login prompts unless you manually open a cloud action</li>
+          <li>Mobile: Sync status now shows lightweight retry and pending states instead of freezing the library screen</li>
+          <li>Release: Fixed Android package generation for the new mobile offline-first update</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-03-08">
       <description>
         <ul>
@@ -165,26 +176,6 @@
           <li>Text-to-Speech: Added navigation controls to return to the current reading position</li>
           <li>Linux: Added an in-app updater for AppImage builds</li>
           <li>E-ink: Improved color support for color E-ink devices to display richer highlights</li>
-        </ul>
-      </description>
-    </release>
-    <release version="0.9.98" date="2026-01-21">
-      <description>
-        <ul>
-          <li>Bookshelf: Added the ability to export original book files directly from the book details dialog</li>
-          <li>Bookshelf: Added a new sorting option to organize books by publish date</li>
-          <li>Bookshelf: Improved performance for large library with faster and more stable imports</li>
-          <li>OPDS: Improved download reliability by correctly detecting filenames for PDF and CBZ files</li>
-          <li>Proofreading: Added support for whole-word replacement to make text corrections more precise</li>
-          <li>Notes: Added the ability to export notes using a customizable template</li>
-          <li>PDF: Added support for panning within PDF documents for easier navigation</li>
-          <li>PDF: Improved performance by pre-rendering the next page for smoother page transitions</li>
-          <li>Text-to-Speech: Added support for word replacement to improve pronunciation during playback</li>
-          <li>Text-to-Speech: Fixed an issue where playback speed settings were not applied correctly on Linux</li>
-          <li>E-ink: Improved reading stability by preventing unwanted scrolling when animations are disabled or on e-ink devices</li>
-          <li>Discord: Added Discord Rich Presence to display your current reading status on Desktop platforms</li>
-          <li>Android: Fixed an issue that could cause occasional crashes during app startup</li>
-          <li>Fonts: Improved web font loading for faster and more stable text rendering</li>
         </ul>
       </description>
     </release>
